@@ -15,3 +15,5 @@ Remove-Item Env:QT_QPA_PLATFORM
 & .\.venv\Scripts\python.exe scripts\copy_notices.py dist\PPView
 Copy-Item LICENSE, LICENSES\LGPL-3.0.txt, THIRD_PARTY_LICENSES.md -Destination dist\PPView
 Compress-Archive -Path dist\PPView -DestinationPath dist\PPView-windows-x64.zip -Force
+& .\.venv\Scripts\python.exe scripts\package_smoke.py
+if ($LASTEXITCODE -ne 0) { throw 'Packaged executable smoke test failed.' }

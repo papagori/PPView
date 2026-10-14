@@ -19,6 +19,13 @@ EN = {
 "about_text":"A local preview utility for PDF and PDF-compatible Illustrator files. PPView is not a preflight or editing application.",
 "language":"Language", "english":"English", "japanese":"日本語", "page":"Page", "of":"of", "mb":"MB",
 "fit":"Fit", "pages_ok":"Pages accessible; rendering check pending", "shortcut":"Ctrl+O",
+"tip_fit_page":"Fit the whole page. Double-click the preview to fit the page.",
+"tip_fit_width":"Fit the page to the available width.", "tip_zoom_in":"Zoom in. Ctrl + mouse wheel also zooms toward the pointer.",
+"tip_zoom_out":"Zoom out. Ctrl + mouse wheel also zooms toward the pointer.", "tip_actual":"Show at 100% zoom.",
+"tip_information":"Show or hide document information and basic checks.", "document_information":"Document Information",
+"preflight_checks":"Preflight Checks (basic rendering only)", "basic_only":"Basic file and rendering checks only; print-production compliance is not checked.",
+"close_document":"Close Document", "clear_all":"Clear All", "tip_close":"Close the selected document.",
+"tip_clear":"Close all loaded documents.", "failed":"Failed", "checking":"Checking…",
 }
 JA = {
 "app":"PPView", "file":"ファイル", "open":"開く…", "exit":"終了", "help":"ヘルプ",
@@ -38,6 +45,13 @@ JA = {
 "about_text":"PDF と PDF 互換 Illustrator ファイルをローカルでプレビューするツールです。プリフライトや編集用のアプリではありません。",
 "language":"言語", "english":"English", "japanese":"日本語", "page":"ページ", "of":"/", "mb":"MB",
 "fit":"フィット", "pages_ok":"ページにアクセス可能。描画チェック待ち", "shortcut":"Ctrl+O",
+"tip_fit_page":"ページ全体を表示します。プレビューをダブルクリックしても同じ操作です。",
+"tip_fit_width":"ページ幅を表示領域に合わせます。", "tip_zoom_in":"拡大します。Ctrl + マウスホイールでもポインター位置を中心に拡大できます。",
+"tip_zoom_out":"縮小します。Ctrl + マウスホイールでもポインター位置を中心に縮小できます。", "tip_actual":"100% の倍率で表示します。",
+"tip_information":"ドキュメント情報と基本チェックの表示を切り替えます。", "document_information":"ドキュメント情報",
+"preflight_checks":"プリフライトチェック（基本描画のみ）", "basic_only":"基本的なファイルと描画の確認のみです。印刷用データの適合性は確認しません。",
+"close_document":"ドキュメントを閉じる", "clear_all":"すべて閉じる", "tip_close":"選択中のドキュメントを閉じます。",
+"tip_clear":"読み込んだすべてのドキュメントを閉じます。", "failed":"失敗", "checking":"確認中…",
 }
 
 def initial_language() -> str:

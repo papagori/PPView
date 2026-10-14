@@ -1,6 +1,6 @@
 # PPView
 
-PPView is a lightweight, local desktop utility for previewing PDF and PDF-compatible Adobe Illustrator files before sending them to a commercial printer. It renders the accessible PDF page content with PDFium and helps you spot missing or misplaced visible content. PPView is a preview utility, not a PDF/Illustrator editor or professional preflight application.
+PPView 0.1.1 is a lightweight, local desktop utility for previewing PDF and PDF-compatible Adobe Illustrator files before sending them to a commercial printer. It renders the accessible PDF page content with PDFium and helps you spot missing or misplaced visible content. PPView is a preview utility, not a PDF/Illustrator editor or professional preflight application.
 
 **Nothing in PPView modifies the source document.** All processing is local; the application has no account, telemetry, cloud processing, or upload feature.
 
@@ -18,7 +18,7 @@ Screenshots will be added when captures from the working application are availab
 
 ## Use
 
-Open PPView, drag a PDF or AI file into the window, or choose **File > Open** / press **Ctrl+O**. Use the page arrows to navigate. Choose Fit Page, Fit Width, or 100%; the zoom buttons and Ctrl+mouse wheel change magnification. The Information & Checks panel reports document details and preliminary rendering status. Choose English or Japanese in the panel; the choice is saved. The initial language follows Windows when no saved selection exists.
+Open PPView, drag one or more PDF or AI files into the window, or choose **File > Open** / press **Ctrl+O** to select multiple files. New files are appended, duplicate canonical paths are ignored, and the newest file becomes active. Switch documents from the toolbar selector; use **Close Document** or **Clear All** to remove documents. Fit Page is applied when a document opens. Drag with the left or middle mouse button to pan; ordinary wheel scrolls, and Ctrl+wheel zooms around the pointer. Double-click the preview to fit the page. The zoom percentage appears beside the zoom controls. The Information panel separates document details from basic rendering checks; these do not establish print-production compliance. Choose English or Japanese in the panel; the choice is saved. The initial language follows Windows when no saved selection exists.
 
 You may also pass a file path when launching `PPView.exe`.
 
