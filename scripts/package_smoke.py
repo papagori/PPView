@@ -20,7 +20,7 @@ except (AttributeError, OSError):
     pass
 
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QPainter
 
 if sys.platform != "win32":
     raise SystemExit("The packaged executable smoke test requires Windows.")
@@ -42,8 +42,14 @@ GetClientRect = user32.GetClientRect
 GetWindowRect = user32.GetWindowRect
 GetDC = user32.GetDC
 ReleaseDC = user32.ReleaseDC
+GetDC.argtypes = [wintypes.HWND]
+GetDC.restype = wintypes.HDC
+ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+ReleaseDC.restype = ctypes.c_int
 gdi32 = ctypes.windll.gdi32
 PrintWindow = user32.PrintWindow
+PrintWindow.argtypes = [wintypes.HWND, wintypes.HDC, wintypes.UINT]
+PrintWindow.restype = wintypes.BOOL
 GetPixel = gdi32.GetPixel
 CreateCompatibleDC = gdi32.CreateCompatibleDC
 CreateCompatibleBitmap = gdi32.CreateCompatibleBitmap
@@ -52,12 +58,25 @@ BitBlt = gdi32.BitBlt
 GetDIBits = gdi32.GetDIBits
 DeleteObject = gdi32.DeleteObject
 DeleteDC = gdi32.DeleteDC
+CreateCompatibleDC.argtypes = [wintypes.HDC]
+CreateCompatibleDC.restype = wintypes.HDC
+CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+CreateCompatibleBitmap.restype = wintypes.HBITMAP
+SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+SelectObject.restype = wintypes.HGDIOBJ
+BitBlt.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                   wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD]
+BitBlt.restype = wintypes.BOOL
+GetDIBits.argtypes = [wintypes.HDC, wintypes.HBITMAP, wintypes.UINT, wintypes.UINT,
+                      ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
+GetDIBits.restype = ctypes.c_int
+DeleteObject.argtypes = [wintypes.HGDIOBJ]
+DeleteObject.restype = wintypes.BOOL
+DeleteDC.argtypes = [wintypes.HDC]
+DeleteDC.restype = wintypes.BOOL
 SRCCOPY = 0x00CC0020
 BI_RGB = 0
 WM_CLOSE = 0x0010
-VK_ESCAPE = 0x1B
-MOUSEEVENTF_LEFTDOWN = 0x0002
-MOUSEEVENTF_LEFTUP = 0x0004
 
 
 def verify_executable_icon(exe: Path):
@@ -200,47 +219,6 @@ def capture_window(hwnd, output: Path):
         ReleaseDC(hwnd, screen_dc)
 
 
-def capture_desktop_window(hwnd, output: Path):
-    """Capture the visible window and native popup menus from the desktop."""
-    rect = wintypes.RECT()
-    GetWindowRect(hwnd, ctypes.byref(rect))
-    width, height = rect.right - rect.left, rect.bottom - rect.top
-    screen_dc = user32.GetDC(None)
-    memory_dc = CreateCompatibleDC(screen_dc)
-    bitmap = CreateCompatibleBitmap(screen_dc, width, height)
-    previous = SelectObject(memory_dc, bitmap)
-    try:
-        if not BitBlt(memory_dc, 0, 0, width, height, screen_dc, rect.left, rect.top, SRCCOPY):
-            raise RuntimeError("Could not capture the visible packaged window")
-
-        class BitmapInfoHeader(ctypes.Structure):
-            _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
-                        ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
-                        ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
-                        ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
-
-        class BitmapInfo(ctypes.Structure):
-            _fields_ = [("bmiHeader", BitmapInfoHeader), ("bmiColors", wintypes.DWORD * 3)]
-
-        info = BitmapInfo()
-        info.bmiHeader.biSize = ctypes.sizeof(BitmapInfoHeader)
-        info.bmiHeader.biWidth, info.bmiHeader.biHeight = width, -height
-        info.bmiHeader.biPlanes, info.bmiHeader.biBitCount = 1, 32
-        info.bmiHeader.biCompression = BI_RGB
-        pixels = ctypes.create_string_buffer(width * height * 4)
-        if not GetDIBits(memory_dc, bitmap, 0, height, pixels, ctypes.byref(info), 0):
-            raise RuntimeError("Could not read screenshot pixels")
-        image = QImage(pixels, width, height, width * 4, QImage.Format.Format_RGB32).copy()
-        output.parent.mkdir(parents=True, exist_ok=True)
-        if not image.save(str(output)):
-            raise RuntimeError(f"Could not save screenshot to {output}")
-    finally:
-        SelectObject(memory_dc, previous)
-        DeleteObject(bitmap)
-        DeleteDC(memory_dc)
-        user32.ReleaseDC(None, screen_dc)
-
-
 def main():
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root / "src"))
@@ -271,9 +249,11 @@ def main():
             raise RuntimeError(f"Portable ZIP is missing required runtime files: {sorted(missing)}")
     with tempfile.TemporaryDirectory(prefix="ppview-packaged-") as folder:
         pdf = Path(folder) / "packaged-smoke.pdf"
+        menu_capture = Path(folder) / "french-file-menu.png"
         pdf.write_bytes(make_pdf(2))
         env = os.environ.copy()
         env["PATH"] = str(Path(os.environ["WINDIR"]) / "System32") + os.pathsep + str(Path(os.environ["WINDIR"]))
+        env["PPVIEW_SMOKE_MENU_CAPTURE"] = str(menu_capture)
         settings = QSettings("papagori", "PPView")
         had_language = settings.contains("language")
         saved_language = settings.value("language")
@@ -314,25 +294,31 @@ def main():
                 ReleaseDC(hwnd, dc)
             if blue_pixels < 50:
                 raise RuntimeError(f"Packaged window did not show rendered blue PDF content ({blue_pixels} sampled pixels)")
-            # Open the actual native File popup in the packaged French app.
-            user32.SetForegroundWindow(hwnd)
-            dpi = user32.GetDpiForWindow(hwnd) or 96
-            window_rect = wintypes.RECT()
-            GetWindowRect(hwnd, ctypes.byref(window_rect))
-            user32.SetCursorPos(window_rect.left + round(42 * dpi / 96),
-                                window_rect.top + round(99 * dpi / 96))
-            user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            time.sleep(0.6)
+            capture_deadline = time.monotonic() + 5
+            while time.monotonic() < capture_deadline and not menu_capture.is_file():
+                if process.poll() is not None:
+                    raise RuntimeError("PPView closed before capturing the French File menu")
+                time.sleep(0.1)
+            if not menu_capture.is_file():
+                raise RuntimeError("Packaged app did not capture its open French File menu")
             capture_path = root / "dist" / "PPView-v0.1.5-fr-menu.png"
-            capture_desktop_window(hwnd, capture_path)
+            base_path = Path(folder) / "packaged-window.png"
+            capture_window(hwnd, base_path)
+            screenshot = QImage(str(base_path))
+            menu_image = QImage(str(menu_capture))
+            metadata = json.loads(menu_capture.with_suffix(".json").read_text(encoding="utf-8"))
+            menu_image.setDevicePixelRatio(1)
+            painter = QPainter(screenshot)
+            painter.drawImage(metadata["x"], metadata["y"], menu_image)
+            painter.end()
+            if not screenshot.save(str(capture_path)):
+                raise RuntimeError("Could not save combined packaged-app screenshot")
             safe_title = title.encode("ascii", "replace").decode("ascii")
             print(f"Packaged app opened and rendered the PDF ({blue_pixels} blue samples): {safe_title}")
             print("Portable ZIP contains PPView.exe, PDFium, and Qt Core/Gui/Widgets DLLs")
             print(f"French toolbar and File menu screenshot saved to {capture_path}")
         finally:
             if process.poll() is None:
-                user32.keybd_event(VK_ESCAPE, 0, 0, 0)
                 if hwnd:
                     PostMessageW(hwnd, WM_CLOSE, 0, 0)
                 try:
