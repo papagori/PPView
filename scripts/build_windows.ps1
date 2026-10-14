@@ -11,7 +11,7 @@ $env:QT_QPA_PLATFORM = 'offscreen'
 & .\.venv\Scripts\python.exe scripts\ui_smoke.py
 if ($LASTEXITCODE -ne 0) { throw 'Qt UI rendering smoke test failed.' }
 Remove-Item Env:QT_QPA_PLATFORM
-& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --paths src src\ppview\main.py
+& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --paths src --add-data "assets/ppview.svg;assets" src\ppview\main.py
 & .\.venv\Scripts\python.exe scripts\copy_notices.py dist\PPView
 Copy-Item LICENSE, LICENSES\LGPL-3.0.txt, THIRD_PARTY_LICENSES.md -Destination dist\PPView
 Compress-Archive -Path dist\PPView -DestinationPath dist\PPView-windows-x64.zip -Force

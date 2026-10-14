@@ -11,6 +11,16 @@ import tempfile
 import time
 import zipfile
 
+# Make the helper see the packaged app's per-monitor physical client size.
+# Otherwise Windows DPI virtualization returns logical coordinates and PrintWindow
+# captures only part of a high-DPI window.
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except (AttributeError, OSError):
+    pass
+
+from PySide6.QtGui import QImage
+
 if sys.platform != "win32":
     raise SystemExit("The packaged executable smoke test requires Windows.")
 
@@ -28,10 +38,21 @@ GetWindowTextW = user32.GetWindowTextW
 IsWindowVisible = user32.IsWindowVisible
 PostMessageW = user32.PostMessageW
 GetClientRect = user32.GetClientRect
+GetWindowRect = user32.GetWindowRect
 GetDC = user32.GetDC
 ReleaseDC = user32.ReleaseDC
 gdi32 = ctypes.windll.gdi32
+PrintWindow = user32.PrintWindow
 GetPixel = gdi32.GetPixel
+CreateCompatibleDC = gdi32.CreateCompatibleDC
+CreateCompatibleBitmap = gdi32.CreateCompatibleBitmap
+SelectObject = gdi32.SelectObject
+BitBlt = gdi32.BitBlt
+GetDIBits = gdi32.GetDIBits
+DeleteObject = gdi32.DeleteObject
+DeleteDC = gdi32.DeleteDC
+SRCCOPY = 0x00CC0020
+BI_RGB = 0
 WM_CLOSE = 0x0010
 
 
@@ -52,6 +73,49 @@ def window_for_pid(pid: int):
 
     EnumWindows(visit, 0)
     return found[0] if found else None
+
+
+def capture_window(hwnd, output: Path):
+    """Save the actual packaged window surface for visual QA."""
+    rect = wintypes.RECT()
+    GetWindowRect(hwnd, ctypes.byref(rect))
+    width, height = rect.right - rect.left, rect.bottom - rect.top
+    screen_dc = GetDC(hwnd)
+    memory_dc = CreateCompatibleDC(screen_dc)
+    bitmap = CreateCompatibleBitmap(screen_dc, width, height)
+    previous = SelectObject(memory_dc, bitmap)
+    try:
+        if not PrintWindow(hwnd, memory_dc, 2) and not BitBlt(memory_dc, 0, 0, width, height, screen_dc, 0, 0, SRCCOPY):
+            raise RuntimeError("Could not capture packaged window surface")
+
+        class BitmapInfoHeader(ctypes.Structure):
+            _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
+                        ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                        ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
+                        ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
+
+        class BitmapInfo(ctypes.Structure):
+            _fields_ = [("bmiHeader", BitmapInfoHeader), ("bmiColors", wintypes.DWORD * 3)]
+
+        info = BitmapInfo()
+        info.bmiHeader.biSize = ctypes.sizeof(BitmapInfoHeader)
+        info.bmiHeader.biWidth = width
+        info.bmiHeader.biHeight = -height
+        info.bmiHeader.biPlanes = 1
+        info.bmiHeader.biBitCount = 32
+        info.bmiHeader.biCompression = BI_RGB
+        pixels = ctypes.create_string_buffer(width * height * 4)
+        if not GetDIBits(memory_dc, bitmap, 0, height, pixels, ctypes.byref(info), 0):
+            raise RuntimeError("Could not read packaged window pixels")
+        image = QImage(pixels, width, height, width * 4, QImage.Format.Format_RGB32).copy()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if not image.save(str(output)):
+            raise RuntimeError(f"Could not save visual smoke capture to {output}")
+    finally:
+        SelectObject(memory_dc, previous)
+        DeleteObject(bitmap)
+        DeleteDC(memory_dc)
+        ReleaseDC(hwnd, screen_dc)
 
 
 def main():
@@ -113,9 +177,12 @@ def main():
                 ReleaseDC(hwnd, dc)
             if blue_pixels < 50:
                 raise RuntimeError(f"Packaged window did not show rendered blue PDF content ({blue_pixels} sampled pixels)")
+            capture_path = root / "dist" / "PPView-v0.1.3-smoke.png"
+            capture_window(hwnd, capture_path)
             safe_title = title.encode("ascii", "replace").decode("ascii")
             print(f"Packaged app opened and rendered the PDF ({blue_pixels} blue samples): {safe_title}")
             print("Portable ZIP contains PPView.exe, PDFium, and Qt Core/Gui/Widgets DLLs")
+            print(f"Visual smoke capture saved to {capture_path}")
         finally:
             if process.poll() is None:
                 if hwnd:

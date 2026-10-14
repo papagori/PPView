@@ -34,7 +34,7 @@ jobs:
       - run: python scripts/ui_smoke.py
         env:
           QT_QPA_PLATFORM: offscreen
-      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --paths src src/ppview/main.py
+      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --paths src --add-data "assets/ppview.svg;assets" src/ppview/main.py
       - run: python scripts/copy_notices.py dist/PPView
       - shell: pwsh
         run: |

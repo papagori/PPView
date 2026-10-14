@@ -3,12 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, QRunnable, QSettings, Qt, QThreadPool, Signal,
-    QPoint, QEvent, QDir, QUrl, QModelIndex)
-from PySide6.QtGui import QAction, QKeySequence, QPixmap, QDesktopServices
+    QPoint, QEvent, QDir, QUrl, QModelIndex, QSize)
+from PySide6.QtGui import QAction, QKeySequence, QPixmap, QDesktopServices, QIcon, QPalette, QColor
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
     QToolBar, QVBoxLayout, QWidget, QToolButton, QFileSystemModel, QTreeView,
-    QAbstractItemView)
+    QAbstractItemView, QLineEdit, QSlider, QMenu, QWidgetAction, QStyle, QHeaderView)
+from PySide6.QtSvg import QSvgRenderer
 
 from ppview.core.document import DocumentError, DocumentInfo, inspect_file, render_page, validate_rendering
 from ppview.i18n.strings import initial_language, strings
@@ -168,13 +169,95 @@ class PreviewLabel(QLabel):
             super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event):
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            pos = self.mapToParent(event.position().toPoint())
-            self.zoom_at.emit(event.angleDelta().y(), pos.x(), pos.y())
+        pos = self.mapToParent(event.position().toPoint())
+        self.zoom_at.emit(event.angleDelta().y(), pos.x(), pos.y())
+        event.accept()
+
+    def enterEvent(self, event):
+        if self._drag_pos is None:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self._drag_pos is None:
+            self.unsetCursor()
+        super().leaveEvent(event)
+
+
+class ZoomControl(QWidget):
+    zoom_requested = Signal(float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("zoomControl")
+        self.setFixedWidth(88)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(3, 0, 3, 0)
+        layout.setSpacing(3)
+        self.edit = QLineEdit("100%")
+        self.edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.edit.setFixedWidth(58)
+        self.edit.setToolTip("")
+        self.edit.editingFinished.connect(self._commit)
+        layout.addWidget(self.edit)
+        self.popup = QToolButton()
+        self.popup.setText("▾")
+        self.popup.setFixedWidth(20)
+        self.menu = QMenu(self)
+        container = QWidget()
+        popup_layout = QVBoxLayout(container)
+        popup_layout.setContentsMargins(10, 8, 10, 8)
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(5, 800)
+        self.slider.setFixedWidth(200)
+        self.slider.valueChanged.connect(self._slider_changed)
+        self.slider.sliderReleased.connect(lambda: self.zoom_requested.emit(self.slider.value() / 100))
+        popup_layout.addWidget(self.slider)
+        action = QWidgetAction(self.menu)
+        action.setDefaultWidget(container)
+        self.menu.addAction(action)
+        self.popup.setMenu(self.menu)
+        self.popup.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.popup.installEventFilter(self)
+        self.slider.installEventFilter(self)
+        self.edit.installEventFilter(self)
+        layout.addWidget(self.popup)
+        self._zoom = 1.0
+
+    def _commit(self):
+        try:
+            value = float(self.edit.text().replace("%", "").strip()) / 100
+        except ValueError:
+            self.set_zoom(self._zoom)
+            return
+        self.zoom_requested.emit(max(0.05, min(8.0, value)))
+
+    def _slider_changed(self, value):
+        self.edit.setText(f"{value}%")
+
+    def set_zoom(self, zoom):
+        self._zoom = max(0.05, min(8.0, float(zoom)))
+        self.edit.setText(f"{self._zoom * 100:.0f}%")
+        self.slider.blockSignals(True)
+        self.slider.setValue(round(self._zoom * 100))
+        self.slider.blockSignals(False)
+
+    def wheelEvent(self, event):
+        self._zoom_from_wheel(event)
+
+    def eventFilter(self, watched, event):
+        if watched in (self.edit, self.popup, self.slider) and event.type() == QEvent.Type.Wheel:
+            self._zoom_from_wheel(event)
+            return True
+        return super().eventFilter(watched, event)
+
+    def _zoom_from_wheel(self, event):
+        delta = event.angleDelta().y()
+        if delta:
+            self.zoom_requested.emit(max(0.05, min(8.0, self._zoom * (1.1 ** (delta / 120)))))
             event.accept()
         else:
             super().wheelEvent(event)
-
 
 class MainWindow(QMainWindow):
     def __init__(self, initial_file: str | None = None):
@@ -196,53 +279,111 @@ class MainWindow(QMainWindow):
         self.pool.setMaxThreadCount(2)
         self._tasks = set()
         self.settings = QSettings("papagori", "PPView")
+        self._preferred_browser_width = int(self.settings.value("browser_width", 300))
         self._build()
         self._drop_filter = WindowDropFilter(self)
         QApplication.instance().installEventFilter(self._drop_filter)
         self._translate()
-        self._restore_browser_directory()
         if initial_file: self.open_files([initial_file])
 
     @staticmethod
     def _canonical(path: str | Path) -> str:
         return str(Path(path).expanduser().resolve()).casefold()
 
+    def _install_theme(self):
+        app = QApplication.instance()
+        palette = QPalette()
+        for role, color in ((QPalette.ColorRole.Window,"#0b1424"),(QPalette.ColorRole.WindowText,"#e6eef8"),(QPalette.ColorRole.Base,"#101e32"),(QPalette.ColorRole.AlternateBase,"#162741"),(QPalette.ColorRole.Text,"#e6eef8"),(QPalette.ColorRole.Button,"#1a2e4b"),(QPalette.ColorRole.ButtonText,"#e6eef8"),(QPalette.ColorRole.Highlight,"#1688e8"),(QPalette.ColorRole.HighlightedText,"#ffffff"),(QPalette.ColorRole.Link,"#55baff")):
+            palette.setColor(role, QColor(color))
+        app.setPalette(palette)
+        self.setStyleSheet("""
+            QWidget { color:#e6eef8; background:#0b1424; }
+            QMenuBar,QMenu,QToolBar { background:#101e32; border:0; }
+            QMenuBar::item { padding:5px 9px; } QMenuBar::item:selected,QMenu::item:selected { background:#1d385c; }
+            QToolBar { spacing:2px; padding:3px 5px; border-bottom:1px solid #263c59; }
+            QToolBar::separator { width:1px; margin:4px 5px; background:#344d6b; }
+            QToolButton,QToolBar QPushButton,QPushButton { color:#e6eef8; background:#1a2e4b; border:1px solid #355273; border-radius:5px; padding:3px 5px; }
+            QToolButton:hover,QToolBar QPushButton:hover,QPushButton:hover { background:#24517d; border-color:#48a9f5; }
+            QToolButton:checked { background:#135c9c; border-color:#38aaff; }
+            QToolButton:disabled,QPushButton:disabled { color:#71839b; background:#111c2c; border-color:#26364c; }
+            QComboBox,QLineEdit { color:#e6eef8; background:#101e32; border:1px solid #355273; border-radius:4px; padding:4px 6px; }
+            QComboBox QAbstractItemView { color:#e6eef8; background:#101e32; selection-background-color:#1688e8; }
+            QSlider::groove:horizontal { height:4px; background:#344d6b; border-radius:2px; }
+            QSlider::sub-page:horizontal { background:#1688e8; } QSlider::handle:horizontal { width:12px; margin:-5px 0; border-radius:6px; background:#56bdff; }
+            QSplitter::handle { background:#263c59; width:2px; }
+            QScrollArea,QTreeView,QAbstractItemView { background:#0e1a2b; alternate-background-color:#14243a; border:0; }
+            QTreeView::item { padding:3px 2px; } QTreeView::item:selected { background:#155a91; }
+            QScrollBar:vertical,QScrollBar:horizontal { background:#101e32; width:12px; height:12px; }
+            QScrollBar::handle:vertical,QScrollBar::handle:horizontal { background:#355273; min-height:24px; min-width:24px; border-radius:5px; }
+            QScrollBar::handle:hover { background:#4b7198; } QScrollBar::add-line,QScrollBar::sub-line { width:0; height:0; }
+            QFrame#dropArea { background:#101e32; border:2px dashed #355273; border-radius:10px; margin:14px; }
+            QLabel#panelHeading { color:#67c5ff; font-weight:700; padding-top:8px; }
+            QToolBar#branding { border-bottom:1px solid #263c59; padding:2px 12px; }
+            QLabel#brandName { color:#eff7ff; font-size:15pt; font-weight:700; }
+            QLabel#brandSlogan { color:#91a9c3; font-size:8pt; }
+            QWidget#branding { background:#101e32; }
+            QStatusBar { background:#101e32; border-top:1px solid #263c59; color:#bdcadd; }
+            QWidget#footer { background:#101e32; border-top:1px solid #263c59; color:#bdcadd; font-size:9pt; }
+            QLabel#footerLink { color:#67c5ff; } QLabel#footerLink:hover { color:#a5e1ff; text-decoration:underline; }
+            QToolTip { color:#f2f7fc; background:#1a2e4b; border:1px solid #4b7198; }
+        """)
+
+    def _build_header(self):
+        brand = QWidget(); brand.setObjectName("branding")
+        row = QHBoxLayout(brand); row.setContentsMargins(8,1,12,1); row.setSpacing(7)
+        icon = QLabel(); icon.setPixmap(self._app_icon().pixmap(34,34)); row.addWidget(icon)
+        labels = QVBoxLayout(); labels.setSpacing(0)
+        self.brand_name = QLabel("PPView"); self.brand_name.setObjectName("brandName")
+        self.brand_slogan = QLabel(); self.brand_slogan.setObjectName("brandSlogan")
+        labels.addWidget(self.brand_name); labels.addWidget(self.brand_slogan); row.addLayout(labels)
+        self.brand_header = brand
+        bar = self.menuBar(); bar.setNativeMenuBar(False); self.menu_bar = bar
+        top = QWidget(); top_layout = QHBoxLayout(top); top_layout.setContentsMargins(0,0,0,0); top_layout.setSpacing(4)
+        top_layout.addWidget(bar, 1); top_layout.addWidget(self.brand_header)
+        self.setMenuWidget(top)
+
+    @staticmethod
+    def _app_icon():
+        import sys
+        svg = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3])) / "assets" / "ppview.svg"
+        renderer = QSvgRenderer(str(svg)); pixmap = QPixmap(64,64); pixmap.fill(Qt.GlobalColor.transparent)
+        from PySide6.QtGui import QPainter
+        painter = QPainter(pixmap); renderer.render(painter); painter.end()
+        return QIcon(pixmap)
+
     def _build(self):
-        self.setMinimumSize(900, 600)
-        self.resize(1280, 820)
+        self.setMinimumSize(1000, 540)
+        self.resize(1200, 600)
+        self._install_theme()
+        self._build_header()
         toolbar = QToolBar()
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.addToolBar(toolbar)
         self.toolbar = toolbar
         self.actions = {}
-        for key in ("fit_page", "fit_width", "zoom_out", "actual", "zoom_in"):
+        self.browser_action = QAction(self); self.browser_action.setCheckable(True); self.browser_action.toggled.connect(self._toggle_browser); toolbar.addAction(self.browser_action)
+        self.panel_action = QAction(self); self.panel_action.setCheckable(True); self.panel_action.setChecked(True); self.panel_action.toggled.connect(self._toggle_panel); toolbar.addAction(self.panel_action)
+        toolbar.addSeparator()
+        for key in ("fit_page", "fit_width", "zoom_out"):
             action = QAction(self)
             action.triggered.connect(lambda checked=False, k=key: self.set_view(k))
             toolbar.addAction(action)
             self.actions[key] = action
-        self.zoom_label = QLabel("100%")
-        self.zoom_label.setMinimumWidth(48)
-        self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        toolbar.addWidget(self.zoom_label)
-        toolbar.addSeparator()
-        self.panel_action = QAction(self)
-        self.panel_action.setCheckable(True)
-        self.panel_action.setChecked(True)
-        self.panel_action.toggled.connect(self._toggle_panel)
-        toolbar.addAction(self.panel_action)
-        self.browser_action = QAction(self); self.browser_action.setCheckable(True); self.browser_action.setChecked(False)
-        self.browser_action.toggled.connect(self._toggle_browser); toolbar.addAction(self.browser_action)
-        toolbar.addSeparator()
+        self.zoom_control = ZoomControl(); self.zoom_control.zoom_requested.connect(self._set_zoom_factor); toolbar.addWidget(self.zoom_control)
+        self.zoom_label = self.zoom_control.edit
+        action = QAction(self); action.triggered.connect(lambda: self.set_view("zoom_in")); toolbar.addAction(action); self.actions["zoom_in"] = action
         self.prev = QPushButton(); self.prev.clicked.connect(lambda: self.change_page(-1)); toolbar.addWidget(self.prev)
         self.page_label = QLabel(); toolbar.addWidget(self.page_label)
         self.next = QPushButton(); self.next.clicked.connect(lambda: self.change_page(1)); toolbar.addWidget(self.next)
         toolbar.addSeparator()
-        self.document_combo = QComboBox(); self.document_combo.setMinimumWidth(160); self.document_combo.setMaximumWidth(260)
-        self.document_combo.currentIndexChanged.connect(self._select_document)
-        toolbar.addWidget(self.document_combo)
         self.close_document_action = QAction(self); self.close_document_action.triggered.connect(self.close_selected_document); toolbar.addAction(self.close_document_action)
         self.clear_action = QAction(self); self.clear_action.triggered.connect(self.clear_all); toolbar.addAction(self.clear_action)
+        self.document_combo = QComboBox(); self.document_combo.setMinimumWidth(140); self.document_combo.setMaximumWidth(230)
+        self.document_combo.currentIndexChanged.connect(self._select_document); toolbar.addWidget(self.document_combo)
+        toolbar.addSeparator()
+        self.lang_combo = QComboBox(); self.lang_combo.setMinimumWidth(105); self.lang_combo.setMaximumWidth(145)
+        self.lang_combo.currentIndexChanged.connect(self._language_changed); toolbar.addWidget(self.lang_combo)
 
         central = QWidget()
         central_layout = QVBoxLayout(central); central_layout.setContentsMargins(0, 0, 0, 0); central_layout.setSpacing(0)
@@ -272,6 +413,11 @@ class MainWindow(QMainWindow):
         self.file_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.file_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.file_tree.setUniformRowHeights(True); self.file_tree.setAnimated(False)
+        self.file_tree.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.file_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.file_tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.file_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.file_tree.setColumnWidth(0, 380)
         for column in (1, 2, 3): self.file_tree.hideColumn(column)
         self.file_tree.doubleClicked.connect(self._browser_double_click)
         self.file_tree.selectionModel().currentChanged.connect(self._browser_current_changed)
@@ -288,13 +434,12 @@ class MainWindow(QMainWindow):
         self.check_heading = QLabel(); self.check_heading.setObjectName("panelHeading"); self.panel_layout.addWidget(self.check_heading)
         for key in ("render", "diagnostics"):
             label = QLabel(); label.setWordWrap(True); self.details[key] = label; self.panel_layout.addWidget(label)
-        self.panel_layout.addStretch(); self.lang_combo = QComboBox(); self.panel_layout.addWidget(self.lang_combo)
-        self.lang_combo.currentIndexChanged.connect(self._language_changed)
+        self.panel_layout.addStretch()
         self.splitter.addWidget(self.panel); self.splitter.setStretchFactor(3, 0)
         self.splitter.setSizes([0, 190, 820, 280])
         self.scroll.viewport().installEventFilter(self)
         central_layout.addWidget(self.splitter, 1)
-        footer = QWidget(); footer.setObjectName("footer")
+        footer = QWidget(); footer.setObjectName("footer"); footer.setFixedHeight(30); self.footer = footer
         footer_layout = QHBoxLayout(footer); footer_layout.setContentsMargins(12, 5, 12, 5); footer_layout.setSpacing(8)
         self.copyright_prefix = QLabel(); footer_layout.addWidget(self.copyright_prefix)
         self.author_link = LinkLabel("Matthieu Tuffet", "https://www.matthieutuffet.com/")
@@ -304,29 +449,21 @@ class MainWindow(QMainWindow):
         self.footer_separator = QLabel("·"); footer_layout.addWidget(self.footer_separator)
         self.license_link = LinkLabel("GPLv3", "https://github.com/papagori/PPView/blob/main/LICENSE")
         footer_layout.addWidget(self.license_link)
-        central_layout.addWidget(footer)
+        footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.statusBar().addWidget(footer, 1)
+        self.statusBar().setMinimumHeight(36)
+        self.statusBar().show()
         self.setCentralWidget(central)
         for widget in (self, central, self.splitter, self.drop, self.scroll, self.scroll.viewport(),
                        self.preview, self.file_browser, self.file_tree, self.panel):
             widget.setAcceptDrops(True)
-        menu = self.menuBar().addMenu(""); self.file_menu = menu
+        menu = self.menu_bar.addMenu(""); self.file_menu = menu
         self.open_action = QAction(self); self.open_action.setShortcut(QKeySequence.StandardKey.Open); self.open_action.triggered.connect(self.choose_files); menu.addAction(self.open_action)
         self.open_folder_action = QAction(self); self.open_folder_action.triggered.connect(self.choose_folder); menu.addAction(self.open_folder_action)
         menu.addSeparator(); menu.addAction(self.close_document_action); menu.addAction(self.clear_action)
         self.exit_action = QAction(self); self.exit_action.triggered.connect(self.close); menu.addAction(self.exit_action)
-        self.help_menu = self.menuBar().addMenu(""); self.about_action = QAction(self); self.about_action.triggered.connect(self.about); self.help_menu.addAction(self.about_action)
-        self.setStyleSheet("""
-            QMainWindow { background: palette(window); }
-            QToolBar { spacing: 5px; padding: 6px; background: palette(window); border-bottom: 1px solid palette(mid); }
-            QToolBar QToolButton, QToolBar QPushButton { color: palette(button-text); background: palette(button); border: 1px solid palette(mid); border-radius: 4px; padding: 5px 8px; }
-            QToolBar QToolButton:hover, QToolBar QPushButton:hover { background: palette(highlight); color: palette(highlighted-text); }
-            QToolBar QToolButton:disabled, QToolBar QPushButton:disabled { color: palette(mid); background: palette(window); }
-            QFrame#dropArea { background: palette(base); border: 2px dashed palette(mid); border-radius: 12px; margin: 14px; }
-            QLabel#panelHeading { font-weight: 700; padding-top: 8px; }
-            QWidget#footer { background: palette(window); border-top: 1px solid palette(mid); color: palette(window-text); font-size: 9pt; }
-            QLabel#footerLink { color: palette(link); }
-            QLabel#footerLink:hover { color: palette(highlight); text-decoration: underline; }
-        """)
+        self.help_menu = self.menu_bar.addMenu(""); self.about_action = QAction(self); self.about_action.triggered.connect(self.about); self.help_menu.addAction(self.about_action)
+        self.setWindowIcon(self._app_icon())
         self._document_state(None)
         self._update_document_controls()
 
@@ -335,36 +472,60 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(t["app"]); self.toolbar.setWindowTitle(t["app"])
         for key, action in self.actions.items():
             action.setText(t[key]); action.setToolTip(t[f"tip_{key}"])
-        self.panel_action.setText(t["information"]); self.panel_action.setToolTip(t["tip_information"])
-        self.browser_action.setText(t["file_browser"]); self.browser_action.setToolTip(t["tip_file_browser"])
-        self.close_document_action.setText(t["close_document"]); self.clear_action.setText(t["clear_all"])
+        self.browser_action.setText(t["file_browser_short"]); self.browser_action.setToolTip(t["tip_file_browser"])
+        self.panel_action.setText(t["information_short"]); self.panel_action.setToolTip(t["tip_information"])
+        self.actions["fit_page"].setText(t["fit_page_short"]); self.actions["fit_width"].setText(t["fit_width_short"])
+        self.close_document_action.setText(t["close_short"]); self.clear_action.setText(t["clear_short"])
         self.close_document_action.setToolTip(t["tip_close"]); self.clear_action.setToolTip(t["tip_clear"])
         self.prev.setText("‹"); self.prev.setToolTip(t["previous"]); self.next.setText("›"); self.next.setToolTip(t["next"])
         self.drop_label.setText(t["drop"]); self.hint_label.setText(t["open_hint"])
         self.browser_heading.setText(t["file_browser"]); self.open_selected_button.setText(t["open_selected"])
+        self.brand_slogan.setText(t["title_suffix"])
+        self.zoom_control.setToolTip(t["tip_zoom"]); self.zoom_control.edit.setToolTip(t["tip_zoom"])
+        self.zoom_control.popup.setToolTip(t["tip_zoom"])
         self.copyright_prefix.setText(t["copyright"])
         self.info_heading.setText(t["document_information"]); self.check_heading.setText(t["preflight_checks"])
         self.file_menu.setTitle(t["file"]); self.open_action.setText(t["open"] + "\t" + t["shortcut"])
         self.open_folder_action.setText(t["open_folder"]); self.exit_action.setText(t["exit"])
+        self.open_action.setToolTip(t["open"] + " (" + t["shortcut"] + ")")
+        self.open_folder_action.setToolTip(t["open_folder"]); self.exit_action.setToolTip(t["exit"])
+        self.document_combo.setToolTip(t["file_browser"])
         self.help_menu.setTitle(t["help"]); self.about_action.setText(t["about"])
-        previous = self.lang_combo.blockSignals(True); self.lang_combo.clear(); self.lang_combo.addItem(t["english"], "en"); self.lang_combo.addItem(t["japanese"], "ja")
-        self.lang_combo.setCurrentIndex(0 if self.language == "en" else 1); self.lang_combo.blockSignals(previous)
+        previous = self.lang_combo.blockSignals(True); self.lang_combo.clear()
+        for label, code in ((t["english"], "en"), (t["japanese"], "ja"), (t["french"], "fr")): self.lang_combo.addItem(label, code)
+        self.lang_combo.setCurrentIndex({"en": 0, "ja": 1, "fr": 2}[self.language]); self.lang_combo.setToolTip(t["tip_language"]); self.lang_combo.blockSignals(previous)
         self._document_state(self.info); self._update_document_controls()
 
     def _language_changed(self, index):
         if index < 0: return
         language = self.lang_combo.itemData(index)
         if language and language != self.language:
-            self.language = language; QSettings("papagori", "PPView").setValue("language", language)
-            self.t = strings(language); self._translate()
+            self.language = language; self.settings.setValue("language", language)
+            self.t = strings(language); self.statusBar().clearMessage(); self._translate()
 
     def _toggle_panel(self, visible):
         self.panel.setVisible(visible)
         if self.info and self.fit_mode in ("page", "width"): self._render()
 
     def _toggle_browser(self, visible):
+        if visible:
+            width = max(220, min(self._preferred_browser_width, max(220, self.splitter.width() - 520)))
+            sizes = self.splitter.sizes()
+            if sizes and sizes[0] < 220:
+                remaining = max(1, sum(sizes) - width)
+                right = sizes[3] if len(sizes) > 3 else 0
+                preview = max(1, remaining - right - 120)
+                drop = max(1, remaining - right - preview)
+                self.splitter.setSizes([width, drop, preview, right])
         self.file_browser.setVisible(visible)
         if self.info and self.fit_mode in ("page", "width"): self._render()
+
+    def _splitter_moved(self, _position, _index):
+        if self.file_browser.isVisible():
+            width = self.splitter.sizes()[0]
+            if width >= 180:
+                self._preferred_browser_width = width
+                self.settings.setValue("browser_width", width)
 
     def _drop_files(self, paths):
         accepted = [p for p in paths if Path(p).suffix.lower() in (".pdf", ".ai")]
@@ -622,9 +783,15 @@ class MainWindow(QMainWindow):
     def set_view(self, key):
         if key == "zoom_in": self.fit_mode = "manual"; self.zoom = min(8.0, self.zoom * 1.2)
         elif key == "zoom_out": self.fit_mode = "manual"; self.zoom = max(0.05, self.zoom / 1.2)
-        elif key == "actual": self.fit_mode = "manual"; self.zoom = 1.0
         elif key == "fit_width": self.fit_mode = "width"
         else: self.fit_mode = "page"
+        self._render()
+
+    def _set_zoom_factor(self, zoom):
+        self.fit_mode = "manual"
+        self.zoom = max(0.05, min(8.0, float(zoom)))
+        self._pending_zoom_anchor = None
+        self.zoom_control.set_zoom(self.zoom)
         self._render()
 
     def resizeEvent(self, event):
@@ -656,7 +823,7 @@ class MainWindow(QMainWindow):
             self._update_page_label(); return
         page = self.info.pages[self.page]
         zoom = self._fit_zoom() if self.fit_mode in ("page", "width") else self.zoom
-        self.zoom_label.setText(f"{zoom * 100:.0f}%")
+        self.zoom_control.set_zoom(zoom)
         dpr = max(1.0, self.devicePixelRatioF())
         pixel_scale = 96.0 / 72.0 * zoom * dpr
         self.render_serial += 1

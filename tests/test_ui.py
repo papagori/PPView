@@ -4,10 +4,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import Qt, QPoint, QPointF
 from PySide6.QtCore import QMimeData, QUrl
 from PySide6.QtCore import QItemSelectionModel
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QWheelEvent
 from PySide6.QtTest import QSignalSpy, QTest
 
 from ppview.core.document import inspect_file
@@ -201,3 +201,104 @@ def test_sidebar_changes_preview_viewport_and_footer_links(monkeypatch, window):
     QTest.mouseClick(window.license_link, Qt.MouseButton.LeftButton)
     assert opened == ["https://www.matthieutuffet.com/", "https://github.com/papagori/PPView",
                       "https://github.com/papagori/PPView/blob/main/LICENSE"]
+
+
+def test_browser_opens_at_useful_width_and_remembers_width(window):
+    window.show()
+    window.browser_action.setChecked(True)
+    QApplication.processEvents()
+    assert window.file_browser.width() >= 220
+    sizes = window.splitter.sizes()
+    sizes[0] = 340
+    window.splitter.setSizes(sizes)
+    window._splitter_moved(window.splitter.sizes()[0], 1)
+    QApplication.processEvents()
+    remembered = int(window.settings.value("browser_width"))
+    assert remembered >= 220
+    window.browser_action.setChecked(False)
+    assert not window.file_browser.isVisible()
+    window.browser_action.setChecked(True)
+    QApplication.processEvents()
+    assert window.file_browser.width() >= 220
+    assert abs(window.file_browser.width() - min(remembered, window.width() - 520)) < 8
+
+
+def test_drive_root_model_starts_collapsed_and_scrolls(window):
+    window.show()
+    QApplication.processEvents()
+    assert not window.file_tree.rootIndex().isValid()
+    assert window.file_tree.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    assert window.file_tree.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+
+
+def test_zoom_control_manual_entry_slider_and_clamping(window):
+    requested = []
+    window.zoom_control.zoom_requested.connect(requested.append)
+    window.zoom_control.edit.setText("175%")
+    window.zoom_control._commit()
+    assert requested[-1] == pytest.approx(1.75)
+    window._set_zoom_factor(1.75)
+    assert window.zoom_control.edit.text() == "175%"
+    assert window.zoom_control.slider.value() == 175
+    window._set_zoom_factor(20)
+    assert window.zoom == 8
+    assert window.zoom_control.edit.text() == "800%"
+    window.zoom_control.set_zoom(1.0)
+    wheel = QWheelEvent(QPointF(10, 10), QPointF(window.zoom_control.edit.mapToGlobal(QPoint(10, 10))),
+                        QPoint(0, 120), QPoint(0, 120), Qt.MouseButton.NoButton,
+                        Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+    QApplication.sendEvent(window.zoom_control.edit, wheel)
+    assert requested[-1] == pytest.approx(1.1)
+
+
+def test_language_switching_translates_and_persists(window):
+    window.lang_combo.setCurrentIndex(2)
+    assert window.language == "fr"
+    assert window.file_menu.title() == "Fichier"
+    assert window.browser_heading.text() == "Explorateur de fichiers"
+    assert window.settings.value("language") == "fr"
+    window.lang_combo.setCurrentIndex(1)
+    assert window.file_menu.title() == "ファイル"
+    window.lang_combo.setCurrentIndex(0)
+    assert window.file_menu.title() == "File"
+
+
+def test_preview_wheel_zoom_and_other_controls_keep_wheel_behavior(window, pdf_file):
+    window.info = inspect_file(pdf_file)
+    window.path = pdf_file.resolve()
+    window.zoom = 1.0
+    window.fit_mode = "manual"
+    wheel = QWheelEvent(QPointF(40, 40), QPointF(window.preview.mapToGlobal(QPoint(40, 40))),
+                        QPoint(0, 120), QPoint(0, 120), Qt.MouseButton.NoButton,
+                        Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+    QApplication.sendEvent(window.preview, wheel)
+    assert window.zoom == pytest.approx(1.2)
+    window.zoom = 1.0
+    window.fit_mode = "manual"
+    wheel = QWheelEvent(QPointF(10, 10), QPointF(window.document_combo.mapToGlobal(QPoint(10, 10))),
+                        QPoint(0, 120), QPoint(0, 120), Qt.MouseButton.NoButton,
+                        Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+    QApplication.sendEvent(window.document_combo, wheel)
+    assert window.zoom == pytest.approx(1.0)
+    # Only the preview handles wheel events as zoom gestures.
+    assert not hasattr(window.document_combo, "zoom_at")
+
+
+def test_toolbar_groups_language_is_last_and_branding_present(window):
+    actions = window.toolbar.actions()
+    widgets = [window.toolbar.widgetForAction(action) for action in actions]
+    assert widgets[-1] is window.lang_combo
+    assert window.brand_name.text() == "PPView"
+    assert window.brand_slogan.text()
+    window.show()
+    QApplication.processEvents()
+    assert window.brand_header.isVisible()
+    assert window.footer.isVisible()
+    assert window.footer.geometry().width() > 500
+
+
+def test_all_languages_have_complete_translation_keys():
+    from ppview.i18n.strings import strings
+    english = strings("en")
+    assert strings("ja").keys() == english.keys()
+    assert strings("fr").keys() == english.keys()
