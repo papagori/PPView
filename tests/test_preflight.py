@@ -51,6 +51,62 @@ def test_reused_image_resource_has_each_placement_and_form_placements_are_walked
     assert form_image.page == 1
 
 
+def test_nested_forms_and_shear_use_full_transformation_for_effective_ppi(tmp_path):
+    nested = create_pdf(tmp_path / "nested-shear.pdf", form_image=True, form_depth=3,
+                        image_placements=[(144, 0, 72, 144, 20, 30)])
+    report = analyze_pdf(nested)
+    placements = [r for r in report.results if r.check_id.startswith("image.placement")]
+    assert report.image_count == report.image_placement_count == 1
+    assert placements[0].measurements["ppi_x"] == pytest.approx(300)
+    assert placements[0].measurements["ppi_y"] == pytest.approx(72 * 600 / (72**2 + 144**2) ** 0.5)
+    assert 200 < placements[0].measurements["effective_ppi"] < 300
+    assert placements[0].details["preview_quality"] == "approximate"
+    assert placements[0].details["placement_clipping_analyzed"] is False
+
+
+def test_analysis_keeps_page_specific_findings_for_mixed_page_sizes(tmp_path):
+    import pikepdf
+
+    path = create_pdf(tmp_path / "mixed-pages.pdf",
+                      image_placements=[(144, 0, 0, 144, 20, 30)])
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        pdf.add_blank_page(page_size=(300, 400))
+        pdf.save(path)
+    report = analyze_pdf(path)
+    geometry = [r for r in report.results if r.check_id.startswith("geometry.boxes.")]
+    assert report.page_count == 2
+    assert [r.page for r in geometry] == [1, 2]
+    assert geometry[0].measurements["media_width_mm"] != geometry[1].measurements["media_width_mm"]
+    assert [r.page for r in report.results if r.check_id.startswith("image.placement.")] == [1]
+
+
+def test_unresolved_do_resource_makes_image_absence_and_counts_unknown(tmp_path):
+    import pikepdf
+
+    path = create_pdf(tmp_path / "missing-xobject.pdf", color_ops="")
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        pdf.pages[0].Contents = pdf.make_stream(b"/Missing Do")
+        pdf.save(path)
+    report = analyze_pdf(path)
+    assert report.image_count is None
+    assert report.image_placement_count is None
+    assert finding(report, "images.scan_incomplete").status is Status.UNKNOWN
+    assert all(r.message_id != "images.none_detected" for r in report.results)
+
+
+def test_malformed_font_resource_does_not_report_no_fonts_as_passed(tmp_path):
+    import pikepdf
+
+    path = create_pdf(tmp_path / "malformed-font-resource.pdf", color_ops="")
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        pdf.pages[0].Resources.Font = pikepdf.String("not-a-font-dictionary")
+        pdf.save(path)
+    report = analyze_pdf(path)
+    assert report.font_count is None
+    assert finding(report, "fonts.scan_incomplete").status is Status.UNKNOWN
+    assert all(r.message_id != "fonts.none_detected" for r in report.results)
+
+
 def test_image_free_and_vector_documents_are_not_defects(tmp_path):
     path = create_pdf(tmp_path / "vector.pdf", color_ops="0 0 1 rg 0 0 20 20 re f")
     report = analyze_pdf(path)
@@ -58,6 +114,25 @@ def test_image_free_and_vector_documents_are_not_defects(tmp_path):
     assert finding(report, "images.none_detected").status is Status.PASSED
     assert finding(report, "fonts.none_detected").status is Status.PASSED
     assert finding(report, "colors.detected").measurements["color_space"] == "DeviceRGB"
+
+
+def test_outlined_glyph_like_paths_do_not_require_a_pdf_font_resource(tmp_path):
+    path = create_pdf(tmp_path / "outlined-text.pdf",
+                      color_ops="0 g 10 10 m 10 30 l 20 30 l 20 10 h f")
+    report = analyze_pdf(path)
+    assert report.font_count == 0
+    assert finding(report, "fonts.none_detected").status is Status.PASSED
+
+
+def test_raster_placement_and_mixed_rgb_cmyk_vector_resources_coexist(tmp_path):
+    path = create_pdf(tmp_path / "mixed-artwork.pdf",
+                      image_placements=[(144, 0, 0, 144, 20, 30)],
+                      color_ops="0 0 1 rg 10 10 30 30 re f 0 0 0 1 k 50 50 30 30 re f")
+    report = analyze_pdf(path)
+    assert report.image_count == report.image_placement_count == 1
+    color_spaces = {r.measurements.get("color_space") for r in report.results
+                    if r.category == "colors" and r.status is Status.PASSED}
+    assert {"DeviceRGB", "DeviceCMYK"} <= color_spaces
 
 
 def test_bad_image_stream_is_reported_as_present_but_decode_failure(tmp_path):

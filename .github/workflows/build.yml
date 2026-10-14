@@ -15,6 +15,7 @@ jobs:
       - run: python -m pip install -r requirements-lock.txt
       - run: python -m pip install --no-deps -e .
       - run: python -m pytest
+      - run: python scripts/pdfium_diagnostics.py
       - run: python scripts/pdfium_smoke.py
       - run: python scripts/ui_smoke.py
         env:
@@ -27,6 +28,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11.5'
+      - run: choco install innosetup --yes --no-progress
       - run: python -m pip install -r requirements-lock.txt
       - run: python -m pip install --no-deps -e .
       - run: python -m pytest -q
@@ -34,20 +36,37 @@ jobs:
       - run: python scripts/ui_smoke.py
         env:
           QT_QPA_PLATFORM: offscreen
-      - run: python scripts/write_build_info.py ppview-build.json
-      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets/logo/ppview.ico --paths src --additional-hooks-dir scripts/pyinstaller_hooks --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "ppview-build.json;." src/ppview/main.py
+      - name: Generate build metadata
+        run: python scripts/write_build_info.py ppview-build.json
+      - name: Set package version
+        shell: pwsh
+        run: |
+          $version = (Get-Content ppview-build.json -Raw | ConvertFrom-Json).version
+          "PPVIEW_VERSION=$version" >> $env:GITHUB_ENV
+      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets/logo/ppview.ico --version-file build/version_info.txt --paths src --additional-hooks-dir scripts/pyinstaller_hooks --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "ppview-build.json;." src/ppview/main.py
       - shell: pwsh
         run: Remove-Item ppview-build.json -Force
       - run: python scripts/copy_notices.py dist/PPView
       - shell: pwsh
         run: |
           Copy-Item LICENSE, LICENSES/LGPL-3.0.txt, THIRD_PARTY_LICENSES.md -Destination dist/PPView
-          Compress-Archive -Path dist/PPView -DestinationPath dist/PPView-windows-x64.zip -Force
+          Compress-Archive -Path dist/PPView -DestinationPath "dist/PPView-Portable-v$env:PPVIEW_VERSION-x64.zip" -Force
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/PPView.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed.' }
       - run: python scripts/package_smoke.py
+      - run: python scripts/installer_smoke.py
+      - shell: pwsh
+        run: |
+          Get-FileHash "dist/PPView-Portable-v$env:PPVIEW_VERSION-x64.zip", "dist/PPView-Setup-v$env:PPVIEW_VERSION-x64.exe" -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))"
+          } | Set-Content -Encoding ascii dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: PPView-windows-x64
-          path: dist/PPView-windows-x64.zip
+          name: PPView-v${{ env.PPVIEW_VERSION }}-windows-x64
+          path: |
+            dist/PPView-Portable-v*-x64.zip
+            dist/PPView-Setup-v*-x64.exe
+            dist/SHA256SUMS.txt
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:

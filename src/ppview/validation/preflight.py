@@ -283,6 +283,8 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
     image_reuse_counts: dict[str, int] = {}
     image_stream_cache: dict[str, tuple[str, str, int | None, str | None]] = {}
     document_font_refs: set[str] = set()
+    document_images_complete = True
+    document_fonts_complete = True
     try:
         page_count = len(pdf.pages)
         if page_count < 1:
@@ -399,6 +401,8 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
             page_fonts: dict[str, tuple[Any, str, str, Status]] = {}
             page_colors: set[str] = set()
             content_error = None
+            page_image_scan_incomplete = False
+            page_font_scan_error = None
 
             def inspect_image(stream, image_dict, width, height, bits, color, matrix,
                               *, image_obj=None, inline=False):
@@ -528,6 +532,7 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
                         details=linked_details, severity="unknown")
 
             def add_fonts(resources):
+                nonlocal page_font_scan_error
                 fonts = resources.get("/Font", {})
                 try:
                     for font in fonts.values():
@@ -537,11 +542,11 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
                             continue
                         name, subtype, embedding_status = _font_embedding(font)
                         page_fonts[key] = (font, name, subtype, embedding_status)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    page_font_scan_error = exc
 
             def walk(content, resources, matrix=(1, 0, 0, 1, 0, 0), depth=0, form_stack=()):
-                nonlocal page_images, image_index, content_error
+                nonlocal page_images, image_index, content_error, page_image_scan_incomplete
                 if depth > 16:
                     raise ValueError("form nesting limit exceeded")
                 add_fonts(resources)
@@ -574,12 +579,14 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
                         xobjects = resources.get("/XObject", {})
                         xobj = xobjects.get(str(operands[0]))
                         if xobj is None:
+                            page_image_scan_incomplete = True
                             continue
                         subtype = str(xobj.get("/Subtype", ""))
                         ref = _obj_ref(xobj)
                         if subtype == "/Form":
                             identity = ref or str(id(xobj))
                             if identity in form_stack:
+                                page_image_scan_incomplete = True
                                 continue
                             form_matrix = tuple(float(v) for v in xobj.get("/Matrix", (1, 0, 0, 1, 0, 0)))
                             child_resources = xobj.get("/Resources", resources)
@@ -593,6 +600,8 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
                             bits = int(xobj.get("/BitsPerComponent", 0) or 0)
                             inspect_image(xobj, xobj, width, height, bits, color, local_matrix,
                                           image_obj=xobj)
+                        else:
+                            page_image_scan_incomplete = True
                     elif op == "INLINE IMAGE":
                         inline = instruction.iimage
                         image_obj = inline.obj
@@ -609,6 +618,8 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
                     "document.content_readable", page=page_number, obj=page_obj)
             except Exception as exc:
                 content_error = exc
+                document_images_complete = False
+                document_fonts_complete = False
                 add(f"document.content.{page_number}", "document", Status.ERROR,
                     "document.content_unreadable", page=page_number, obj=page_obj,
                     details={"error_type": type(exc).__name__}, severity="error")
@@ -617,7 +628,12 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
                         f"{category}.scan_incomplete", page=page_number, obj=page_obj,
                         severity="unknown")
 
-            if page_images == 0 and content_error is None:
+            if page_image_scan_incomplete:
+                document_images_complete = False
+                add(f"images.scan_incomplete.{page_number}", "images", Status.UNKNOWN,
+                    "images.scan_incomplete", page=page_number, obj=page_obj,
+                    severity="unknown")
+            if page_images == 0 and content_error is None and not page_image_scan_incomplete:
                 add(f"images.none.{page_number}", "images", Status.PASSED,
                     "images.none_detected", page=page_number)
             for font_key, (font, name, subtype, embedding_status) in page_fonts.items():
@@ -631,7 +647,13 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
                     page=page_number, obj=font, measurements={"name": name, "subtype": subtype},
                     details={"resource_key": font_key},
                     severity="warning" if status is Status.WARNING else "unknown" if status is Status.UNKNOWN else "info")
-            if not page_fonts and content_error is None:
+            if page_font_scan_error is not None:
+                document_fonts_complete = False
+                add(f"fonts.scan_incomplete.{page_number}", "fonts", Status.UNKNOWN,
+                    "fonts.scan_incomplete", page=page_number, obj=page_obj,
+                    details={"error_type": type(page_font_scan_error).__name__},
+                    severity="unknown")
+            if not page_fonts and content_error is None and page_font_scan_error is None:
                 add(f"fonts.none.{page_number}", "fonts", Status.PASSED,
                     "fonts.none_detected", page=page_number)
             if not page_colors and content_error is None:
@@ -666,8 +688,10 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
             details["reuse_status"] = "reused" if reuse_count > 1 else "single"
             result = replace(result, details=details)
         finalized.append(result)
-    return PreflightReport(tuple(finalized), page_count, len(unique_image_keys),
-                           len(document_font_refs), image_index)
+    return PreflightReport(tuple(finalized), page_count,
+                           len(unique_image_keys) if document_images_complete else None,
+                           len(document_font_refs) if document_fonts_complete else None,
+                           image_index if document_images_complete else None)
 
 
 def run_preflight(path: str | Path, settings: PreflightSettings = PreflightSettings()) -> PreflightReport:

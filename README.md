@@ -1,6 +1,6 @@
 # PPView
 
-PPView 0.2.1 is an independent local desktop viewer for PDFs and Adobe Illustrator `.ai` files that contain PDF-compatible content. It requires no Adobe application, service, account, or scripting API. It renders pages with PDFium and reports a focused set of technical preflight observations. PPView does not edit or repair source files and is not a certified print-production validator.
+PPView 0.2.2 is an independent local desktop viewer for PDFs and Adobe Illustrator `.ai` files that contain PDF-compatible content. It requires no Adobe application, service, account, or scripting API. It renders pages with PDFium and reports a focused set of technical preflight observations. PPView does not edit or repair source files and is not a certified print-production validator.
 
 **Source documents are never modified.** Files stay on the local computer; PPView has no account, telemetry, cloud processing, or upload feature.
 
@@ -46,7 +46,17 @@ python -m pytest
 
 The generated fixtures cover image scaling and rotation, form placements, font resources, page boxes, and common color spaces. They are synthetic PDFs and do not claim full Adobe Illustrator compatibility.
 
-## Build the portable Windows executable
+## Install or use the portable Windows build
+
+For a per-user installation on Windows 10 or 11 x64, run `PPView-Setup-v0.2.2-x64.exe`. Choose an installation folder, select an installer language (English, Japanese, or French), and optionally enable the desktop shortcut. The installer creates a Start Menu shortcut and a standard Windows uninstall entry. It does not change `.ai` or `.pdf` file associations. Uninstall from **Settings > Apps > Installed apps** or the Start Menu; PPView preferences remain in the user profile.
+
+The installer is unsigned. Windows SmartScreen may warn that the software is unfamiliar. Verify the SHA-256 checksum file distributed beside the installer before running it.
+
+The portable package is `PPView-Portable-v0.2.2-x64.zip`. Extract the folder anywhere writable and run `PPView/PPView.exe`; no installation or Python runtime is required. Preferences continue to be stored in the current Windows user profile.
+
+For the genuine Illustrator document checklist, see [Real AI validation](docs/REAL_AI_VALIDATION.md).
+
+## Build Windows distributions from source
 
 On Windows with Python 3.11 installed:
 
@@ -54,11 +64,11 @@ On Windows with Python 3.11 installed:
 ./scripts/build_windows.ps1
 ```
 
-The script recreates the project `.venv`, runs tests and smoke checks, builds `dist/PPView/` and `dist/PPView-windows-x64.zip`, verifies the packaged icon and preflight dependencies, then launches the packaged EXE with a generated PDF. GitHub Actions performs the same Windows x64 build on pushes to `main` and `feature/**`, pull requests, and manual runs. The package includes dependency license notices.
+The script recreates the project `.venv`, runs tests and smoke checks, builds the portable ZIP and Inno Setup installer from the same one-folder app build, verifies the package, and runs install/upgrade/uninstall smoke checks. GitHub Actions stores the ZIP, installer, and SHA-256 checksums as workflow artifacts; it does not publish a release.
 
 ## PDFium diagnostic
 
-On this Windows development machine, enabling Python's `faulthandler` prints a `Windows fatal exception: access violation` stack at `FPDF_InitLibraryWithConfig` during pypdfium2 import. The same process continues, reports PDFium initialized, and passes the standalone render smoke check; ordinary import without faulthandler is quiet. This native first-chance/handled exception has not yet been traced to its upstream cause. It remains under investigation and must be rechecked before any public release.
+Run `python scripts/pdfium_diagnostics.py` to repeat the isolated import, pytest, faulthandler, and rendering comparisons. Current local evidence and limits are recorded in [PDFium investigation](docs/PDFIUM_INVESTIGATION.md). The exception remains under investigation and must be rechecked on a clean Windows machine before a public beta.
 
 ## License and dependencies
 

@@ -1,6 +1,6 @@
 # PPView
 
-PPView 0.2.1 est une application de bureau indépendante et locale pour prévisualiser les PDF et les fichiers Adobe Illustrator `.ai` contenant une représentation PDF compatible. Aucun logiciel, service, compte ou API Adobe n’est requis. PDFium rend les pages ; PPView ajoute un ensemble ciblé d’observations techniques de prépresse. L’application ne modifie et ne répare pas les fichiers source. Ce n’est pas un outil certifié de validation de production imprimée.
+PPView 0.2.2 est une application de bureau indépendante et locale pour prévisualiser les PDF et les fichiers Adobe Illustrator `.ai` contenant une représentation PDF compatible. Aucun logiciel, service, compte ou API Adobe n’est requis. PDFium rend les pages ; PPView ajoute un ensemble ciblé d’observations techniques de prépresse. L’application ne modifie et ne répare pas les fichiers source. Ce n’est pas un outil certifié de validation de production imprimée.
 
 **Les documents source ne sont jamais modifiés.** Les fichiers restent sur l’ordinateur ; PPView n’utilise ni compte, télémétrie, traitement cloud ou téléversement.
 
@@ -41,17 +41,27 @@ python -m pytest
 
 Les PDF de test sont générés automatiquement et couvrent notamment l’échelle des images, les Form XObjects, les polices, les boîtes de page et les espaces colorimétriques courants. Ils sont synthétiques et ne prétendent pas valider complètement la compatibilité Adobe Illustrator.
 
-## Application Windows portable
+## Installation Windows et version portable
+
+Sous Windows 10 ou 11 x64, lancez `PPView-Setup-v0.2.2-x64.exe` pour une installation par utilisateur. Choisissez le dossier, la langue de l’installateur (anglais, japonais ou français) et, si souhaité, le raccourci du bureau. Un raccourci du menu Démarrer et une entrée de désinstallation Windows sont créés. Les associations `.ai` et `.pdf` ne sont pas modifiées. Désinstallez depuis **Paramètres > Applications > Applications installées** ; les préférences du profil utilisateur sont conservées.
+
+L’installateur n’est pas signé. SmartScreen peut signaler un logiciel peu connu. Vérifiez le SHA-256 fourni à côté du programme d’installation.
+
+La version portable est `PPView-Portable-v0.2.2-x64.zip`. Extrayez-la dans un dossier accessible et lancez `PPView/PPView.exe`. Python n’est pas requis ; les préférences restent dans le profil Windows de l’utilisateur.
+
+Consultez la [liste de validation de vrais fichiers Illustrator](docs/REAL_AI_VALIDATION.md).
+
+## Construire les paquets Windows depuis les sources
 
 ```powershell
 ./scripts/build_windows.ps1
 ```
 
-Le script recrée `.venv`, exécute les tests et les smoke tests, construit `dist/PPView/` et `dist/PPView-windows-x64.zip`, vérifie l’icône et les dépendances du prépresse, puis lance l’EXE avec un PDF de test. GitHub Actions effectue le même build Windows x64 sur `main`, `feature/**`, les pull requests et les exécutions manuelles. Le ZIP contient les notices de licence.
+Le script recrée `.venv`, exécute les tests et les smoke tests, construit le ZIP portable et l’installateur Inno Setup depuis le même build, puis vérifie l’installation, la mise à niveau et la désinstallation. GitHub Actions conserve le ZIP, l’installateur et leurs sommes SHA-256 comme artefacts de workflow ; aucune publication n’est créée.
 
 ## Diagnostic PDFium connu
 
-Sur cette machine de développement Windows, l’activation de `faulthandler` affiche une trace `Windows fatal exception: access violation` au niveau de `FPDF_InitLibraryWithConfig` pendant l’import pypdfium2. Le même processus continue, indique PDFium initialisé et passe le smoke test de rendu autonome ; l’import sans faulthandler est silencieux. L’origine amont de cette exception native, interceptée ou de premier plan, n’est pas encore établie. Elle reste à étudier et doit être vérifiée avant toute publication publique.
+Lancez `python scripts/pdfium_diagnostics.py` pour répéter les comparaisons isolées d’import, pytest, faulthandler et rendu. Les observations locales et leurs limites sont consignées dans [l’enquête PDFium](docs/PDFIUM_INVESTIGATION.md). L’exception reste à l’étude et doit être vérifiée sur un Windows propre avant une bêta publique.
 
 ## Licence
 

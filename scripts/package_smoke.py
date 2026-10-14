@@ -53,6 +53,7 @@ WM_CLOSE = 0x0010
 
 def verify_executable_icon(exe: Path):
     """Verify the packaged PE icon group and every embedded PNG payload."""
+    from ppview import __version__
     import struct
     import pefile
 
@@ -71,6 +72,14 @@ def verify_executable_icon(exe: Path):
 
     pe = pefile.PE(str(exe), fast_load=True)
     pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_RESOURCE']])
+    expected_version = tuple(int(value) for value in __version__.split(".")) + (0,)
+    if not pe.VS_FIXEDFILEINFO:
+        raise RuntimeError("PPView.exe is missing Windows file-version metadata")
+    fixed = pe.VS_FIXEDFILEINFO[0]
+    actual_version = (fixed.FileVersionMS >> 16, fixed.FileVersionMS & 0xFFFF,
+                      fixed.FileVersionLS >> 16, fixed.FileVersionLS & 0xFFFF)
+    if actual_version != expected_version:
+        raise RuntimeError(f"PPView.exe version metadata is {actual_version}, expected {expected_version}")
     resources = {entry.id: entry for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries}
 
     def resource_data(entry):
@@ -171,7 +180,7 @@ def main():
             raise FileNotFoundError(package / required)
     if not list((package / "_internal").rglob("qpdf30*.dll")):
         raise FileNotFoundError("PyInstaller distribution is missing pikepdf's QPDF runtime DLL")
-    archive = root / "dist" / "PPView-windows-x64.zip"
+    archive = root / "dist" / f"PPView-Portable-v{__version__}-x64.zip"
     required_zip = {"PPView/PPView.exe", "PPView/_internal/pypdfium2_raw/pdfium.dll",
                     "PPView/_internal/PySide6/Qt6Core.dll", "PPView/_internal/PySide6/Qt6Gui.dll",
                     "PPView/_internal/PySide6/Qt6Widgets.dll", "PPView/_internal/ppview-build.json"}

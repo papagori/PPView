@@ -5,7 +5,7 @@ import zlib
 import pikepdf
 
 
-def create_pdf(path, *, image_placements=(), form_image=False, font_modes=(),
+def create_pdf(path, *, image_placements=(), form_image=False, form_depth=1, font_modes=(),
                page_boxes=None, rotate=0, color_ops="0 0 1 rg 0 0 10 10 re f"):
     pdf = pikepdf.Pdf.new()
     page = pdf.add_blank_page(page_size=(612, 792))
@@ -29,16 +29,19 @@ def create_pdf(path, *, image_placements=(), form_image=False, font_modes=(),
         image.ColorSpace = pikepdf.Name.DeviceRGB
         image.BitsPerComponent = 8
         if form_image:
-            form_resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=image))
-            form = pdf.make_stream(b"/Im0 Do")
-            form.Type = pikepdf.Name.XObject
-            form.Subtype = pikepdf.Name.Form
-            form.BBox = pikepdf.Array([0, 0, 1, 1])
-            form.Matrix = pikepdf.Array([1, 0, 0, 1, 0, 0])
-            form.Resources = form_resources
-            xobjects["/Fm0"] = form
+            child_name = "/Im0"
+            child = image
+            for level in range(form_depth):
+                form = pdf.make_stream(f"{child_name} Do".encode("ascii"))
+                form.Type = pikepdf.Name.XObject
+                form.Subtype = pikepdf.Name.Form
+                form.BBox = pikepdf.Array([0, 0, 1, 1])
+                form.Matrix = pikepdf.Array([1, 0, 0, 1, 0, 0])
+                form.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary({child_name: child}))
+                child_name, child = f"/Fm{level}", form
+            xobjects[child_name] = child
             for matrix in image_placements:
-                commands.append("q " + " ".join(map(str, matrix)) + " cm /Fm0 Do Q")
+                commands.append("q " + " ".join(map(str, matrix)) + f" cm {child_name} Do Q")
         else:
             xobjects["/Im0"] = image
             for matrix in image_placements:
@@ -82,7 +85,8 @@ def create_pdf(path, *, image_placements=(), form_image=False, font_modes=(),
                 font_dict.FontDescriptor = descriptor
             font = pdf.make_indirect(font_dict)
         font_resources[f"/F{index}"] = font
-        commands.append(f"BT /F{index} 12 Tf 10 20 Td (sample) Tj ET")
+        text = "<3042>" if mode == "cid-embedded" else "(sample)"
+        commands.append(f"BT /F{index} 12 Tf 10 20 Td {text} Tj ET")
     if font_resources:
         resources.Font = font_resources
 

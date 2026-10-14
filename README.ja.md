@@ -1,6 +1,6 @@
 # PPView
 
-PPView 0.2.1 は、PDF および PDF 互換コンテンツを含む Adobe Illustrator `.ai` ファイルをプレビューする、独立したローカルデスクトップアプリです。Adobe ソフトウェア、サービス、アカウント、スクリプト API は不要です。PDFium でページを描画し、限定した技術的なプリフライト情報を表示します。ソースファイルの編集や修復は行いません。認証済みの印刷工程検証ツールではありません。
+PPView 0.2.2 は、PDF および PDF 互換コンテンツを含む Adobe Illustrator `.ai` ファイルをプレビューする、独立したローカルデスクトップアプリです。Adobe ソフトウェア、サービス、アカウント、スクリプト API は不要です。PDFium でページを描画し、限定した技術的なプリフライト情報を表示します。ソースファイルの編集や修復は行いません。認証済みの印刷工程検証ツールではありません。
 
 **元のドキュメントは変更されません。** ファイル処理はローカルで行い、アカウント、テレメトリー、クラウド処理、アップロード機能はありません。
 
@@ -37,17 +37,27 @@ python -m pytest
 
 テストでは画像の拡大縮小・回転、Form XObject、フォントリソース、ページボックス、基本カラー空間を含む PDF を生成します。いずれも合成データで、実際の Illustrator ファイル全般との互換性を証明するものではありません。
 
-## Windows ポータブル版
+## Windows インストーラーとポータブル版
+
+Windows 10/11 x64 では `PPView-Setup-v0.2.2-x64.exe` を実行するとユーザー単位でインストールできます。インストール先とインストーラーの言語（英語、日本語、フランス語）を選び、必要ならデスクトップショートカットを有効にします。スタートメニューのショートカットと Windows のアンインストール登録を作成します。`.ai` と `.pdf` の関連付けは変更しません。アンインストールは **設定 > アプリ > インストールされているアプリ** から行えます。ユーザー設定は保持されます。
+
+インストーラーにはデジタル署名がありません。Windows SmartScreen が未知のアプリとして警告する場合があります。配布物に含まれる SHA-256 チェックサムを確認してください。
+
+ポータブル版は `PPView-Portable-v0.2.2-x64.zip` です。書き込み可能な場所に展開し、`PPView/PPView.exe` を起動してください。インストールも Python も不要です。設定は Windows ユーザープロファイルに保存されます。
+
+[実際の Illustrator ファイルでの確認手順](docs/REAL_AI_VALIDATION.md)を参照してください。
+
+## Windows 配布物をソースからビルド
 
 ```powershell
 ./scripts/build_windows.ps1
 ```
 
-スクリプトは `.venv` を再作成してテストとスモークチェックを実行し、`dist/PPView/` と `dist/PPView-windows-x64.zip` を作成します。実際のパッケージアイコンとプリフライト依存 DLL を確認し、生成 PDF を使って EXE を起動します。GitHub Actions は `main`、`feature/**` への push、プルリクエスト、手動実行で同じ Windows x64 ビルドを行います。ZIP に依存ライセンスを含めます。
+スクリプトは `.venv` を再作成してテストとスモークチェックを実行し、同じアプリビルドからポータブル ZIP と Inno Setup インストーラーを作成します。インストール、上書きインストール、アンインストールも確認します。GitHub Actions は ZIP、インストーラー、SHA-256 をワークフロー成果物として保存し、リリースは自動公開しません。
 
 ## PDFium の診断情報
 
-この Windows 開発環境では Python の `faulthandler` を有効にすると、pypdfium2 の読み込み時に `FPDF_InitLibraryWithConfig` の位置で `Windows fatal exception: access violation` のスタックが表示されます。同じプロセスは終了せず、PDFium 初期化を確認でき、単独の描画スモークテストにも成功します。通常の `import` では表示されません。このネイティブ例外（ハンドリング済みまたは first-chance）の上流原因は未特定です。今後も調査し、公開前に再確認します。
+`python scripts/pdfium_diagnostics.py` で import、pytest、faulthandler、描画を個別に比較できます。現在の観察結果と制約は[PDFium 調査記録](docs/PDFIUM_INVESTIGATION.md)にあります。この例外は未解決のため、公開ベータ前にクリーンな Windows 環境でも確認してください。
 
 ## ライセンス
 
