@@ -1,0 +1,47 @@
+name: Test and build Windows
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.5'
+      - run: python -m pip install -r requirements-lock.txt
+      - run: python -m pip install --no-deps -e .
+      - run: python -m pytest
+      - run: python scripts/pdfium_smoke.py
+      - run: python scripts/ui_smoke.py
+        env:
+          QT_QPA_PLATFORM: offscreen
+  build:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.5'
+      - run: python -m pip install -r requirements-lock.txt
+      - run: python -m pip install --no-deps -e .
+      - run: python -m pytest -q
+      - run: python scripts/pdfium_smoke.py
+      - run: python scripts/ui_smoke.py
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --paths src src/ppview/main.py
+      - run: python scripts/copy_notices.py dist/PPView
+      - shell: pwsh
+        run: |
+          Copy-Item LICENSE, LICENSES/LGPL-3.0.txt, THIRD_PARTY_LICENSES.md -Destination dist/PPView
+          Compress-Archive -Path dist/PPView -DestinationPath dist/PPView-windows-x64.zip -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PPView-windows-x64
+          path: dist/PPView-windows-x64.zip
+          if-no-files-found: error

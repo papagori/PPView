@@ -1,0 +1,19 @@
+# Build/test environment lock for CPython 3.11 on Windows x64.
+altgraph==0.17.5
+colorama==0.4.6
+iniconfig==2.3.0
+pip==26.2.1
+packaging==26.0
+pefile==2024.8.26
+pluggy==1.5.0
+Pygments==2.19.2
+PyInstaller==6.22.3
+pyinstaller-hooks-contrib==2026.7
+pypdfium2==5.14.0
+PySide6==6.11.0
+PySide6_Addons==6.11.0
+PySide6_Essentials==6.11.0
+pytest==8.4.2
+pywin32-ctypes==0.2.3
+setuptools==65.5.0
+shiboken6==6.11.0

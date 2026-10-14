@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ppview"
+version = "0.1.0"
+description = "A lightweight local previewer for PDF and PDF-compatible Illustrator files"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = ["PySide6>=6.7,<7", "pypdfium2>=4.30,<6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "pyinstaller>=6.10,<7"]
+
+[project.scripts]
+ppview = "ppview.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
