@@ -8,13 +8,15 @@ from PySide6.QtGui import QAction, QKeySequence, QPixmap, QDesktopServices, QIco
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
     QToolBar, QVBoxLayout, QWidget, QToolButton, QFileSystemModel, QTreeView,
-    QAbstractItemView, QLineEdit, QSlider, QMenu, QWidgetAction, QStyle, QHeaderView)
+    QAbstractItemView, QLineEdit, QSlider, QMenu, QWidgetAction, QStyle, QHeaderView,
+    QTreeWidget, QTreeWidgetItem, QDialog, QDialogButtonBox, QFormLayout)
 from PySide6.QtSvg import QSvgRenderer
 
 from ppview.core.document import DocumentError, DocumentInfo, inspect_file, render_page, validate_rendering
 from ppview.i18n.strings import initial_language, strings
 from ppview import __version__
 from ppview.build_info import build_commit
+from ppview.validation import CheckResult, PreflightReport, PreflightSettings, Status, run_preflight
 
 
 class WorkerSignals(QObject):
@@ -269,6 +271,10 @@ class MainWindow(QMainWindow):
         self.documents: dict[str, DocumentInfo | None] = {}
         self.document_paths: dict[str, Path] = {}
         self.validation: dict[str, str] = {}
+        self.preflight_reports: dict[tuple[str, PreflightSettings], PreflightReport] = {}
+        self.preflight_in_flight: set[tuple[str, int | None, PreflightSettings]] = set()
+        self.document_generations: dict[str, int] = {}
+        self._next_document_generation = 0
         self.info: DocumentInfo | None = None
         self.path: Path | None = None
         self.page = 0
@@ -282,6 +288,7 @@ class MainWindow(QMainWindow):
         self._tasks = set()
         self.settings = QSettings("papagori", "PPView")
         self._preferred_browser_width = int(self.settings.value("browser_width", 300))
+        self._preflight_settings = self._read_preflight_settings()
         self._build()
         self._drop_filter = WindowDropFilter(self)
         QApplication.instance().installEventFilter(self._drop_filter)
@@ -291,6 +298,14 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _canonical(path: str | Path) -> str:
         return str(Path(path).expanduser().resolve()).casefold()
+
+    def _read_preflight_settings(self) -> PreflightSettings:
+        try:
+            resolution = int(self.settings.value("preflight/target_image_ppi", 300))
+            bleed = float(self.settings.value("preflight/minimum_bleed_mm", 3))
+            return PreflightSettings(resolution, bleed)
+        except (TypeError, ValueError):
+            return PreflightSettings()
 
     def _install_theme(self):
         app = QApplication.instance()
@@ -404,6 +419,7 @@ class MainWindow(QMainWindow):
         self.file_menu_button.setMenu(self.file_menu); self.palette_a_layout.addWidget(self.file_menu_button)
         self.open_action = QAction(self); self.open_action.setShortcut(QKeySequence.StandardKey.Open); self.open_action.triggered.connect(self.choose_files); self.file_menu.addAction(self.open_action)
         self.open_folder_action = QAction(self); self.open_folder_action.triggered.connect(self.choose_folder); self.file_menu.addAction(self.open_folder_action)
+        self.settings_action = QAction(self); self.settings_action.triggered.connect(self.open_preflight_settings); self.file_menu.addAction(self.settings_action)
         self.file_menu.addSeparator()
         self.browser_action = QAction(self); self.browser_action.setCheckable(True); self.browser_action.toggled.connect(self._toggle_browser); self.palette_a_layout.addWidget(self._action_button(self.browser_action))
         self.panel_action = QAction(self); self.panel_action.setCheckable(True); self.panel_action.setChecked(True); self.panel_action.toggled.connect(self._toggle_panel); self.palette_a_layout.addWidget(self._action_button(self.panel_action))
@@ -482,6 +498,10 @@ class MainWindow(QMainWindow):
         self.check_heading = QLabel(); self.check_heading.setObjectName("panelHeading"); self.panel_layout.addWidget(self.check_heading)
         for key in ("render", "diagnostics"):
             label = QLabel(); label.setWordWrap(True); self.details[key] = label; self.panel_layout.addWidget(label)
+        self.check_tree = QTreeWidget(); self.check_tree.setHeaderHidden(True)
+        self.check_tree.setRootIsDecorated(True); self.check_tree.setUniformRowHeights(True)
+        self.check_tree.setMinimumHeight(150); self.check_tree.itemClicked.connect(self._activate_check_item)
+        self.panel_layout.addWidget(self.check_tree, 1)
         self.panel_layout.addStretch()
         self.splitter.addWidget(self.panel); self.splitter.setStretchFactor(3, 0)
         self.splitter.setSizes([0, 190, 820, 280])
@@ -541,6 +561,7 @@ class MainWindow(QMainWindow):
         self.help_menu_button.setText(t["help"]); self.help_menu_button.setToolTip(t["help"])
         self.file_menu.setTitle(t["file"]); self.open_action.setText(t["open"])
         self.open_folder_action.setText(t["open_folder"]); self.exit_action.setText(t["exit"])
+        self.settings_action.setText(t["settings_menu"]); self.settings_action.setToolTip(t["settings_menu"])
         self.open_action.setToolTip(t["open"])
         self.open_folder_action.setToolTip(t["open_folder"]); self.exit_action.setToolTip(t["exit"])
         self._size_file_menu_for_actions()
@@ -551,6 +572,7 @@ class MainWindow(QMainWindow):
         self.lang_combo.setCurrentIndex({"en": 0, "ja": 1, "fr": 2}[self.language]); self.lang_combo.setToolTip(t["tip_language"]); self.lang_combo.blockSignals(previous)
         if self.isVisible(): self._update_toolbar_group_width()
         self._document_state(self.info); self._update_document_controls()
+        self._refresh_preflight_language()
 
     def _language_changed(self, index):
         if index < 0: return
@@ -656,6 +678,8 @@ class MainWindow(QMainWindow):
             if key not in self.documents:
                 self.documents[key] = None
                 self.document_paths[key] = p
+                self._next_document_generation += 1
+                self.document_generations[key] = self._next_document_generation
                 added.append((key, p))
         self._refresh_document_combo()
         if added:
@@ -723,7 +747,9 @@ class MainWindow(QMainWindow):
         if key not in self.documents: return
         self.documents.pop(key); self._refresh_document_combo()
         self.document_paths.pop(key, None)
+        self.document_generations.pop(key, None)
         self.validation.pop(key, None)
+        self.preflight_reports = {entry: report for entry, report in self.preflight_reports.items() if entry[0] != key}
         if key != (self._canonical(self.path) if self.path else None): return
         self.info = None; self.preview.clear(); self.drop.show(); self._document_state(None, error=reason)
         self.path = None; self._update_document_controls()
@@ -732,6 +758,8 @@ class MainWindow(QMainWindow):
         if not self.path: return
         key = self._canonical(self.path); keys = list(self.documents)
         index = keys.index(key); self.documents.pop(key, None); self.document_paths.pop(key, None); self.validation.pop(key, None)
+        self.document_generations.pop(key, None)
+        self.preflight_reports = {entry: report for entry, report in self.preflight_reports.items() if entry[0] != key}
         if self.documents:
             remaining = list(self.documents)
             target = remaining[min(index, len(remaining) - 1)]
@@ -743,7 +771,7 @@ class MainWindow(QMainWindow):
 
     def clear_all(self):
         self.token += 1; self.render_serial += 1
-        self.documents.clear(); self.document_paths.clear(); self.validation.clear(); self.path = None; self.info = None; self.page = 0
+        self.documents.clear(); self.document_paths.clear(); self.document_generations.clear(); self.validation.clear(); self.preflight_reports.clear(); self.path = None; self.info = None; self.page = 0
         self.preview.clear(); self.preview.hide(); self.drop.show(); self._document_state(None)
         self._refresh_document_combo(); self._update_document_controls()
 
@@ -756,17 +784,29 @@ class MainWindow(QMainWindow):
     def _validate_selected(self):
         if not self.info or not self.path: return
         key = self._canonical(self.path)
-        if key in self.validation:
+        selected = self._canonical(self.path)
+        settings = self._preflight_settings
+        report = self.preflight_reports.get((key, settings))
+        if report is not None:
+            self._preflight_display(report)
+            render = next((r for r in report.results if r.check_id == "document.render"), None)
+            self.validation[key] = "passed" if render and render.status is Status.PASSED else "failed"
             self._validation_display(self.validation[key])
-            return
-        self.validation[key] = "checking"
-        self._validation_display("checking")
-        token = self.token
-        info = self.info
-        task = Task(token, lambda: validate_rendering(info.path, len(info.pages)))
-        task.signals.result.connect(lambda tok, _result, k=key: self._validation_done_for(k, tok))
-        task.signals.failed.connect(lambda tok, _err, k=key: self._validation_failed_for(k, tok))
-        self._start_task(task)
+        else:
+            self.details["diagnostics"].setText(f"{self.t['diagnostics']}: {self.t['analysis_running']}")
+            self.check_tree.clear()
+            generation = self.document_generations.get(key)
+            task_key = (key, generation, settings)
+            if task_key not in self.preflight_in_flight:
+                self.preflight_in_flight.add(task_key)
+                task = Task(self.token, lambda p=self.info.path, s=settings: run_preflight(p, s))
+                task.signals.result.connect(lambda _tok, result, k=key, g=generation, s=settings:
+                                            self._preflight_done_for(k, g, s, result))
+                task.signals.failed.connect(lambda _tok, err, k=key, g=generation, s=settings:
+                                            self._preflight_failed_for(k, g, s, err))
+                self._start_task(task)
+            self.validation[key] = "checking"
+            self._validation_display("checking")
 
     def _start_task(self, task):
         # Keep the Python QRunnable wrapper alive until its queued signals have
@@ -778,7 +818,6 @@ class MainWindow(QMainWindow):
     def _validation_display(self, status):
         if not self.info: return
         self.details["render"].setText(f"{self.t['render']}: {self.t[status]}")
-        self.details["diagnostics"].setText(f"{self.t['diagnostics']}: {self.t['basic_only']}")
 
     def _validation_done_for(self, key, token):
         if key not in self.documents: return
@@ -790,11 +829,169 @@ class MainWindow(QMainWindow):
         self.validation[key] = "failed"
         if token == self.token and key == (self._canonical(self.path) if self.path else None): self._validation_display("failed")
 
+    def _preflight_done_for(self, key, generation, settings, report):
+        self.preflight_in_flight.discard((key, generation, settings))
+        if key not in self.documents or self.document_generations.get(key) != generation:
+            return
+        self.preflight_reports[(key, settings)] = report
+        render = next((r for r in report.results if r.check_id == "document.render"), None)
+        self.validation[key] = "passed" if render and render.status is Status.PASSED else "failed"
+        if (key == (self._canonical(self.path) if self.path else None)
+                and settings == self._preflight_settings):
+            self._preflight_display(report)
+            self._validation_display(self.validation[key])
+
+    def _preflight_failed_for(self, key, generation, settings, _error):
+        self.preflight_in_flight.discard((key, generation, settings))
+        if key not in self.documents or self.document_generations.get(key) != generation:
+            return
+        failure = tuple(CheckResult(f"{category}.failure", category, Status.UNKNOWN,
+                                    f"{category}.unavailable", severity="unknown")
+                        for category in ("document", "images", "fonts", "geometry", "colors"))
+        report = PreflightReport(failure, None, None, None)
+        self.preflight_reports[(key, settings)] = report
+        if key == (self._canonical(self.path) if self.path else None) and settings == self._preflight_settings:
+            self._preflight_display(report)
+            self.details["render"].setText(f"{self.t['render']}: {self.t['status_unknown']}")
+
+    def _preflight_display(self, report: PreflightReport):
+        self.check_tree.clear()
+        rendering = next((item for item in report.results if item.check_id == "document.render"), None)
+        render_label = self.t["status_unknown"]
+        if rendering is not None:
+            render_label = {Status.PASSED: self.t["passed"], Status.WARNING: self.t["status_warning"],
+                            Status.ERROR: self.t["failed"], Status.UNKNOWN: self.t["status_unknown"]}[rendering.status]
+        self.details["render"].setText(f"{self.t['render']}: {render_label}")
+        categories = ("document", "images", "fonts", "geometry", "colors")
+        status_keys = {Status.PASSED: "status_passed", Status.WARNING: "status_warning",
+                       Status.ERROR: "status_error", Status.UNKNOWN: "status_unknown"}
+        colors = {Status.PASSED: "#66d68a", Status.WARNING: "#ffd166",
+                  Status.ERROR: "#ff7272", Status.UNKNOWN: "#a8b6c8"}
+        category_keys = {"document": "check_document", "images": "check_images",
+                         "fonts": "check_fonts", "geometry": "check_geometry", "colors": "check_colors"}
+        for category in categories:
+            findings = [result for result in report.results if result.category == category]
+            counts = {status: sum(item.status is status for item in findings) for status in Status}
+            group = QTreeWidgetItem(self.check_tree)
+            group.setText(0, f"{self.t[category_keys[category]]}  ·  "
+                          f"{counts[Status.PASSED]} ✓  {counts[Status.WARNING]} !  "
+                          f"{counts[Status.ERROR]} ×  {counts[Status.UNKNOWN]} ?")
+            group.setForeground(0, QColor("#91a9c3"))
+            group.setExpanded(True)
+            for result in findings:
+                message = self._preflight_message(result)
+                row = QTreeWidgetItem(group)
+                status_text = self.t[status_keys[result.status]]
+                if result.severity == "high": status_text = f"{self.t['priority_high']} · {status_text}"
+                row.setText(0, f"{status_text} — {message}")
+                row_color = "#ffad66" if result.severity == "high" else colors[result.status]
+                row.setForeground(0, QColor(row_color))
+                row.setToolTip(0, message)
+                row.setData(0, Qt.ItemDataRole.UserRole, result)
+                details = self._preflight_details(result)
+                if details:
+                    detail_item = QTreeWidgetItem(row)
+                    detail_item.setText(0, f"{self.t['details']}: {details}")
+                    detail_item.setForeground(0, QColor("#a8b6c8"))
+        self.details["diagnostics"].setText(self._preflight_summary(report))
+
+    def _preflight_message(self, result: CheckResult) -> str:
+        template = self.t.get(result.message_id, self.t["check_unavailable"])
+        values = dict(result.measurements)
+        if result.page is not None: values["page"] = result.page
+        values.setdefault("count", 0)
+        try:
+            return template.format(**values)
+        except (KeyError, ValueError, TypeError):
+            return template
+
+    def _preflight_details(self, result: CheckResult) -> str:
+        entries = []
+        labels = {
+            "width_px": "measure_width_px", "height_px": "measure_height_px",
+            "bits_per_component": "measure_bit_depth", "color_space": "measure_color_space",
+            "ppi_x": "measure_ppi_x", "ppi_y": "measure_ppi_y",
+            "effective_ppi": "measure_effective_ppi", "target_ppi": "measure_target_ppi",
+            "name": "measure_font", "subtype": "measure_font_type", "count": "measure_count",
+            "minimum_mm": "measure_min_bleed", "target_mm": "measure_target_bleed",
+            "left_mm": "measure_left", "right_mm": "measure_right",
+            "top_mm": "measure_top", "bottom_mm": "measure_bottom",
+            "media_width_mm": "measure_media_width", "media_height_mm": "measure_media_height",
+            "crop_width_mm": "measure_crop_width", "crop_height_mm": "measure_crop_height",
+            "rotation": "measure_rotation",
+        }
+        for name, value in result.measurements.items():
+            if name.endswith("_pt") or name.endswith("_x0") or name.endswith("_y0") or name.endswith("_x1") or name.endswith("_y1"):
+                continue
+            label = self.t.get(labels.get(name, "measure_" + name), name.replace("_", " "))
+            if isinstance(value, float):
+                value_text = f"{value:.1f}"
+            else:
+                value_text = str(value)
+            if name.endswith("_mm") or name in ("minimum_mm", "target_mm", "left_mm", "right_mm", "top_mm", "bottom_mm"):
+                value_text += " mm"
+            elif name.endswith("_ppi") or name in ("target_ppi", "effective_ppi", "ppi_x", "ppi_y"):
+                value_text += " PPI"
+            entries.append(f"{label}: {value_text}")
+        if result.object_ref:
+            entries.append(f"{self.t['measure_object']}: {result.object_ref}")
+        if result.page is not None:
+            entries.append(f"{self.t['page']}: {result.page}")
+        if result.bounding_box_pt:
+            box = " × ".join(f"{value:.1f}" for value in result.bounding_box_pt)
+            entries.append(f"{self.t['measure_bounds']}: {box} pt")
+        return "; ".join(entries)
+
+    def _preflight_summary(self, report):
+        results = report.results
+        warnings = sum(item.status is Status.WARNING for item in results)
+        errors = sum(item.status is Status.ERROR for item in results)
+        unknown = sum(item.status is Status.UNKNOWN for item in results)
+        images = self.t["measure_unknown"] if report.image_count is None else str(report.image_count)
+        fonts = self.t["measure_unknown"] if report.font_count is None else str(report.font_count)
+        return self.t["preflight_summary"].format(images=images, fonts=fonts,
+                                                  warnings=warnings, errors=errors, unknown=unknown)
+
+    def _activate_check_item(self, item, _column):
+        result = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(result, CheckResult) and result.page and self.info:
+            self.page = max(0, min(len(self.info.pages) - 1, result.page - 1))
+            self._update_page_label(); self._update_dimensions(); self._render()
+
+    def open_preflight_settings(self):
+        dialog = QDialog(self); dialog.setWindowTitle(self.t["settings_title"])
+        layout = QVBoxLayout(dialog); form = QFormLayout()
+        resolution = QComboBox(); resolution.addItems(["150 PPI", "200 PPI", "300 PPI"])
+        resolution.setCurrentIndex({150: 0, 200: 1, 300: 2}[self._preflight_settings.target_image_ppi])
+        bleed = QComboBox(); bleed.addItems(["0 mm", "2 mm", "3 mm", "5 mm"])
+        bleed.setCurrentIndex({0: 0, 2: 1, 3: 2, 5: 3}[int(self._preflight_settings.minimum_bleed_mm)])
+        form.addRow(self.t["settings_resolution"], resolution)
+        form.addRow(self.t["settings_bleed"], bleed); layout.addLayout(form)
+        note = QLabel(self.t["settings_note"]); note.setWordWrap(True); layout.addWidget(note)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted: return
+        new_settings = PreflightSettings((150, 200, 300)[resolution.currentIndex()],
+                                         (0, 2, 3, 5)[bleed.currentIndex()])
+        if new_settings != self._preflight_settings:
+            self._preflight_settings = new_settings
+            self.settings.setValue("preflight/target_image_ppi", new_settings.target_image_ppi)
+            self.settings.setValue("preflight/minimum_bleed_mm", new_settings.minimum_bleed_mm)
+            if self.info:
+                self._validate_selected()
+
+    def _refresh_preflight_language(self):
+        if not self.info or not self.path: return
+        report = self.preflight_reports.get((self._canonical(self.path), self._preflight_settings))
+        if report is not None:
+            self._preflight_display(report)
+
     def _document_state(self, info, loading=False, error=None):
         t = self.t
         if not info:
             status = t.get(error, t["invalid"]) if error else (t["loading"] if loading else t["not_open"])
             for key in self.details: self.details[key].setText(f"{t[key]}: {status}")
+            self.check_tree.clear()
             if error: QMessageBox.warning(self, t["app"], status)
             self.zoom_label.setText("—")
             return
@@ -804,7 +1001,7 @@ class MainWindow(QMainWindow):
         self.details["pages"].setText(f"{t['pages']}: {len(info.pages)}")
         self.details["status"].setText(f"{t['status']}: {t['ready']}")
         self.details["render"].setText(f"{t['render']}: {t['checking']}")
-        self.details["diagnostics"].setText(f"{t['diagnostics']}: {t['basic_only']}")
+        self.details["diagnostics"].setText(f"{t['diagnostics']}: {t['analysis_running']}")
         self._update_dimensions(); self.setWindowTitle(f"{info.path.name} — PPView")
 
     def _update_dimensions(self):

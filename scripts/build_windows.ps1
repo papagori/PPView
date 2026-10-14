@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Qt UI rendering smoke test failed.' }
 Remove-Item Env:QT_QPA_PLATFORM
 & .\.venv\Scripts\python.exe scripts\write_build_info.py ppview-build.json
 if ($LASTEXITCODE -ne 0) { throw 'Could not write build metadata.' }
-& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets\logo\ppview.ico --paths src --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "ppview-build.json;." src\ppview\main.py
+& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets\logo\ppview.ico --paths src --additional-hooks-dir scripts\pyinstaller_hooks --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "ppview-build.json;." src\ppview\main.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 Remove-Item -LiteralPath ppview-build.json -Force
 & .\.venv\Scripts\python.exe scripts\copy_notices.py dist\PPView

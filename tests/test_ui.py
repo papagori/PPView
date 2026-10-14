@@ -382,7 +382,8 @@ def test_toolbar_groups_language_is_last_and_branding_present(window):
     assert window.brand_header.isVisible()
     assert window.footer.isVisible()
     assert window.footer.geometry().width() > 500
-    assert window.version_label.text() == "PPView v0.1.5"
+    from ppview import __version__
+    assert window.version_label.text() == f"PPView v{__version__}"
 
 
 def test_application_version_and_about_diagnostics_are_dynamic(window, monkeypatch):
@@ -402,3 +403,59 @@ def test_all_languages_have_complete_translation_keys():
     english = strings("en")
     assert strings("ja").keys() == english.keys()
     assert strings("fr").keys() == english.keys()
+
+
+def test_preflight_results_render_by_category_and_retranslate_without_reanalysis(window, multi_pdf):
+    from ppview.validation import CheckResult, PreflightReport, Status
+    from ppview.i18n.strings import strings
+    report = PreflightReport((
+        CheckResult("document.pages", "document", Status.PASSED, "document.page_count",
+                    measurements={"count": 3}),
+        CheckResult("image.low", "images", Status.WARNING, "image.resolution_low", page=2,
+                    measurements={"effective_ppi": 120, "width_px": 100, "height_px": 100,
+                                  "target_ppi": 300}, severity="high"),
+        CheckResult("font.missing", "fonts", Status.WARNING, "fonts.not_embedded", page=1,
+                    measurements={"name": "TestFont", "subtype": "Type0"}),
+        CheckResult("bleed.unknown", "geometry", Status.UNKNOWN, "geometry.bleed_boxes_missing", page=1),
+        CheckResult("color.rgb", "colors", Status.PASSED, "colors.detected",
+                    measurements={"color_space": "DeviceRGB"}),
+    ), page_count=3, image_count=1, font_count=1)
+    window.info = inspect_file(multi_pdf); window.path = multi_pdf.resolve()
+    window._preflight_display(report)
+    assert window.check_tree.topLevelItemCount() == 5
+    assert "1" in window.check_tree.topLevelItem(1).text(0)
+    warning = window.check_tree.topLevelItem(1).child(0)
+    assert "120 PPI" in warning.text(0)
+    assert warning.foreground(0).color().name() == "#ffad66"
+    before = window.check_tree.topLevelItem(1).child(0).text(0)
+    window.language = "ja"; window.t = strings("ja"); window._preflight_display(report)
+    assert window.check_tree.topLevelItem(1).text(0).startswith("画像")
+    assert window.check_tree.topLevelItem(1).child(0).text(0) != before
+
+
+def test_stale_preflight_result_after_close_and_reopen_is_ignored(window, pdf_file):
+    from ppview.validation import PreflightReport, PreflightSettings, CheckResult, Status
+    key = window._canonical(pdf_file); info = inspect_file(pdf_file)
+    window.documents[key] = info; window.document_paths[key] = pdf_file.resolve()
+    window.document_generations[key] = 3; window.path = pdf_file.resolve(); window.info = info
+    report = PreflightReport((CheckResult("document.test", "document", Status.PASSED,
+                                          "document.page_count", measurements={"count": 1}),), 1, 0, 0)
+    settings = PreflightSettings()
+    window._preflight_done_for(key, 2, settings, report)
+    assert (key, settings) not in window.preflight_reports
+    window._preflight_done_for(key, 3, settings, report)
+    assert window.preflight_reports[(key, settings)] is report
+
+
+def test_preflight_issue_selects_its_page_without_modifying_pdf(window, multi_pdf, monkeypatch):
+    from PySide6.QtWidgets import QTreeWidgetItem
+    from ppview.validation import CheckResult, Status
+    info = inspect_file(multi_pdf); window.info = info; window.path = multi_pdf.resolve()
+    rendered = []; monkeypatch.setattr(window, "_render", lambda: rendered.append(window.page))
+    result = CheckResult("image.issue", "images", Status.WARNING, "image.resolution_low", page=3,
+                         bounding_box_pt=(10, 20, 30, 40))
+    item = QTreeWidgetItem(); item.setData(0, Qt.ItemDataRole.UserRole, result)
+    original = multi_pdf.read_bytes()
+    window._activate_check_item(item, 0)
+    assert window.page == 2 and rendered == [2]
+    assert multi_pdf.read_bytes() == original

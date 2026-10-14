@@ -17,10 +17,32 @@ def main():
     window.show()
     menu_capture = os.environ.get("PPVIEW_SMOKE_MENU_CAPTURE")
     window_capture = os.environ.get("PPVIEW_SMOKE_WINDOW_CAPTURE")
-    if menu_capture and window_capture:
-        def show_and_capture_menu():
+    preflight_capture = os.environ.get("PPVIEW_SMOKE_PREFLIGHT_CAPTURE")
+    if preflight_capture:
+        def save_preflight_report():
+            active_key = window._canonical(window.path) if window.path else None
+            matches = [(settings, report) for (key, settings), report in window.preflight_reports.items()
+                       if key == active_key]
+            if matches:
+                settings, report = matches[-1]
+                payload = {"version": __import__("ppview").__version__,
+                           "page_count": report.page_count, "image_count": report.image_count,
+                           "font_count": report.font_count,
+                           "results": [{"check_id": result.check_id, "category": result.category,
+                                        "status": result.status.value, "message_id": result.message_id}
+                                       for result in report.results]}
+                Path(preflight_capture).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                return
+            QTimer.singleShot(200, save_preflight_report)
+
+        QTimer.singleShot(300, save_preflight_report)
+    if window_capture:
+        def capture_window():
             if not window.grab().save(window_capture):
                 raise RuntimeError(f"Could not capture the packaged window at {window_capture}")
+        QTimer.singleShot(2500, capture_window)
+    if menu_capture and window_capture:
+        def show_and_capture_menu():
             anchor = window.file_menu_button.mapToGlobal(QPoint(0, window.file_menu_button.height()))
             window.file_menu.popup(anchor)
             QTimer.singleShot(450, capture_menu)
@@ -40,7 +62,7 @@ def main():
                         "device_pixel_ratio": window.devicePixelRatioF()}
             Path(menu_capture).with_suffix(".json").write_text(json.dumps(metadata), encoding="utf-8")
 
-        QTimer.singleShot(2500, show_and_capture_menu)
+        QTimer.singleShot(3000, show_and_capture_menu)
         QTimer.singleShot(10000, window.close)
     return app.exec()
 
