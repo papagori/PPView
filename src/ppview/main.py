@@ -16,8 +16,11 @@ def main():
     window = MainWindow(sys.argv[1] if len(sys.argv) > 1 else None)
     window.show()
     menu_capture = os.environ.get("PPVIEW_SMOKE_MENU_CAPTURE")
-    if menu_capture:
+    window_capture = os.environ.get("PPVIEW_SMOKE_WINDOW_CAPTURE")
+    if menu_capture and window_capture:
         def show_and_capture_menu():
+            if not window.grab().save(window_capture):
+                raise RuntimeError(f"Could not capture the packaged window at {window_capture}")
             anchor = window.file_menu_button.mapToGlobal(QPoint(0, window.file_menu_button.height()))
             window.file_menu.popup(anchor)
             QTimer.singleShot(450, capture_menu)
@@ -31,9 +34,9 @@ def main():
             if not pixmap.save(menu_capture):
                 raise RuntimeError(f"Could not capture the French File menu at {menu_capture}")
             origin = menu.mapToGlobal(QPoint(0, 0))
-            frame = window.frameGeometry()
-            metadata = {"x": round((origin.x() - frame.x()) * window.devicePixelRatioF()),
-                        "y": round((origin.y() - frame.y()) * window.devicePixelRatioF()),
+            client_origin = window.mapToGlobal(QPoint(0, 0))
+            metadata = {"x": round((origin.x() - client_origin.x()) * window.devicePixelRatioF()),
+                        "y": round((origin.y() - client_origin.y()) * window.devicePixelRatioF()),
                         "device_pixel_ratio": window.devicePixelRatioF()}
             Path(menu_capture).with_suffix(".json").write_text(json.dumps(metadata), encoding="utf-8")
 

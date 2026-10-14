@@ -11,9 +11,7 @@ import tempfile
 import time
 import zipfile
 
-# Make the helper see the packaged app's per-monitor physical client size.
-# Otherwise Windows DPI virtualization returns logical coordinates and PrintWindow
-# captures only part of a high-DPI window.
+# Make pixel sampling use the packaged app's per-monitor physical client size.
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except (AttributeError, OSError):
@@ -39,7 +37,6 @@ GetWindowTextW = user32.GetWindowTextW
 IsWindowVisible = user32.IsWindowVisible
 PostMessageW = user32.PostMessageW
 GetClientRect = user32.GetClientRect
-GetWindowRect = user32.GetWindowRect
 GetDC = user32.GetDC
 ReleaseDC = user32.ReleaseDC
 GetDC.argtypes = [wintypes.HWND]
@@ -47,35 +44,9 @@ GetDC.restype = wintypes.HDC
 ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
 ReleaseDC.restype = ctypes.c_int
 gdi32 = ctypes.windll.gdi32
-PrintWindow = user32.PrintWindow
-PrintWindow.argtypes = [wintypes.HWND, wintypes.HDC, wintypes.UINT]
-PrintWindow.restype = wintypes.BOOL
 GetPixel = gdi32.GetPixel
-CreateCompatibleDC = gdi32.CreateCompatibleDC
-CreateCompatibleBitmap = gdi32.CreateCompatibleBitmap
-SelectObject = gdi32.SelectObject
-BitBlt = gdi32.BitBlt
-GetDIBits = gdi32.GetDIBits
-DeleteObject = gdi32.DeleteObject
-DeleteDC = gdi32.DeleteDC
-CreateCompatibleDC.argtypes = [wintypes.HDC]
-CreateCompatibleDC.restype = wintypes.HDC
-CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
-CreateCompatibleBitmap.restype = wintypes.HBITMAP
-SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
-SelectObject.restype = wintypes.HGDIOBJ
-BitBlt.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                   wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD]
-BitBlt.restype = wintypes.BOOL
-GetDIBits.argtypes = [wintypes.HDC, wintypes.HBITMAP, wintypes.UINT, wintypes.UINT,
-                      ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
-GetDIBits.restype = ctypes.c_int
-DeleteObject.argtypes = [wintypes.HGDIOBJ]
-DeleteObject.restype = wintypes.BOOL
-DeleteDC.argtypes = [wintypes.HDC]
-DeleteDC.restype = wintypes.BOOL
-SRCCOPY = 0x00CC0020
-BI_RGB = 0
+GetPixel.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+GetPixel.restype = wintypes.DWORD
 WM_CLOSE = 0x0010
 
 
@@ -176,49 +147,6 @@ def window_for_pid(pid: int):
     return found[0] if found else None
 
 
-def capture_window(hwnd, output: Path):
-    """Save the actual packaged window surface for visual QA."""
-    rect = wintypes.RECT()
-    GetWindowRect(hwnd, ctypes.byref(rect))
-    width, height = rect.right - rect.left, rect.bottom - rect.top
-    screen_dc = GetDC(hwnd)
-    memory_dc = CreateCompatibleDC(screen_dc)
-    bitmap = CreateCompatibleBitmap(screen_dc, width, height)
-    previous = SelectObject(memory_dc, bitmap)
-    try:
-        if not PrintWindow(hwnd, memory_dc, 2) and not BitBlt(memory_dc, 0, 0, width, height, screen_dc, 0, 0, SRCCOPY):
-            raise RuntimeError("Could not capture packaged window surface")
-
-        class BitmapInfoHeader(ctypes.Structure):
-            _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
-                        ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
-                        ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
-                        ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
-
-        class BitmapInfo(ctypes.Structure):
-            _fields_ = [("bmiHeader", BitmapInfoHeader), ("bmiColors", wintypes.DWORD * 3)]
-
-        info = BitmapInfo()
-        info.bmiHeader.biSize = ctypes.sizeof(BitmapInfoHeader)
-        info.bmiHeader.biWidth = width
-        info.bmiHeader.biHeight = -height
-        info.bmiHeader.biPlanes = 1
-        info.bmiHeader.biBitCount = 32
-        info.bmiHeader.biCompression = BI_RGB
-        pixels = ctypes.create_string_buffer(width * height * 4)
-        if not GetDIBits(memory_dc, bitmap, 0, height, pixels, ctypes.byref(info), 0):
-            raise RuntimeError("Could not read packaged window pixels")
-        image = QImage(pixels, width, height, width * 4, QImage.Format.Format_RGB32).copy()
-        output.parent.mkdir(parents=True, exist_ok=True)
-        if not image.save(str(output)):
-            raise RuntimeError(f"Could not save visual smoke capture to {output}")
-    finally:
-        SelectObject(memory_dc, previous)
-        DeleteObject(bitmap)
-        DeleteDC(memory_dc)
-        ReleaseDC(hwnd, screen_dc)
-
-
 def main():
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root / "src"))
@@ -250,10 +178,12 @@ def main():
     with tempfile.TemporaryDirectory(prefix="ppview-packaged-") as folder:
         pdf = Path(folder) / "packaged-smoke.pdf"
         menu_capture = Path(folder) / "french-file-menu.png"
+        window_capture = Path(folder) / "packaged-window.png"
         pdf.write_bytes(make_pdf(2))
         env = os.environ.copy()
         env["PATH"] = str(Path(os.environ["WINDIR"]) / "System32") + os.pathsep + str(Path(os.environ["WINDIR"]))
         env["PPVIEW_SMOKE_MENU_CAPTURE"] = str(menu_capture)
+        env["PPVIEW_SMOKE_WINDOW_CAPTURE"] = str(window_capture)
         settings = QSettings("papagori", "PPView")
         had_language = settings.contains("language")
         saved_language = settings.value("language")
@@ -295,18 +225,17 @@ def main():
             if blue_pixels < 50:
                 raise RuntimeError(f"Packaged window did not show rendered blue PDF content ({blue_pixels} sampled pixels)")
             capture_deadline = time.monotonic() + 5
-            while time.monotonic() < capture_deadline and not menu_capture.is_file():
+            while time.monotonic() < capture_deadline and not (menu_capture.is_file() and window_capture.is_file()):
                 if process.poll() is not None:
                     raise RuntimeError("PPView closed before capturing the French File menu")
                 time.sleep(0.1)
-            if not menu_capture.is_file():
+            if not menu_capture.is_file() or not window_capture.is_file():
                 raise RuntimeError("Packaged app did not capture its open French File menu")
             capture_path = root / "dist" / "PPView-v0.1.5-fr-menu.png"
-            base_path = Path(folder) / "packaged-window.png"
-            capture_window(hwnd, base_path)
-            screenshot = QImage(str(base_path))
+            screenshot = QImage(str(window_capture))
             menu_image = QImage(str(menu_capture))
             metadata = json.loads(menu_capture.with_suffix(".json").read_text(encoding="utf-8"))
+            screenshot.setDevicePixelRatio(1)
             menu_image.setDevicePixelRatio(1)
             painter = QPainter(screenshot)
             painter.drawImage(metadata["x"], metadata["y"], menu_image)
