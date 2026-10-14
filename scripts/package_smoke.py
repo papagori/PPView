@@ -221,9 +221,10 @@ def main():
                 env["PATH"] = str(Path(os.environ["WINDIR"]) / "System32") + os.pathsep + str(Path(os.environ["WINDIR"]))
                 env["PPVIEW_SMOKE_WINDOW_CAPTURE"] = str(window_capture)
                 env["PPVIEW_SMOKE_IMAGE_CAPTURE"] = str(image_capture)
+                env["PPVIEW_SMOKE_PREFLIGHT_CAPTURE"] = str(
+                    Path(folder) / f"{language}-packaged-preflight.json")
                 if menu_capture:
                     env["PPVIEW_SMOKE_MENU_CAPTURE"] = str(menu_capture)
-                    env["PPVIEW_SMOKE_PREFLIGHT_CAPTURE"] = str(preflight_capture)
                 process = subprocess.Popen([str(exe), str(pdf)], cwd=exe.parent, env=env)
                 hwnd = None
                 try:
@@ -283,7 +284,7 @@ def main():
                         if not any(cid == "document.open" and status == "passed" for cid, status in checks):
                             raise RuntimeError("Packaged pikepdf structure check did not pass")
                         if preflight["image_count"] < 1 or not any(
-                                item["check_id"].startswith("image.resolution.")
+                                item["check_id"].startswith("image.placement.")
                                 and item["status"] == "passed" for item in preflight["results"]):
                             raise RuntimeError("Packaged pikepdf image placement/PPI check did not pass")
                         screenshot = QImage(str(window_capture))
