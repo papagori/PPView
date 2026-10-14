@@ -328,9 +328,14 @@ def test_toolbar_overflow_keeps_help_and_language_available(window):
 
 def test_app_icon_has_multiple_sizes_and_runtime_icon(window):
     from pathlib import Path
-    icon_path = Path(__file__).resolve().parents[1] / "assets" / "ppview.ico"
+    import struct
+    icon_path = Path(__file__).resolve().parents[1] / "assets" / "logo" / "ppview.ico"
     data = icon_path.read_bytes()
     assert data[:6] == b"\x00\x00\x01\x00\x07\x00"
+    dimensions = {(w or 256, h or 256) for w, h in
+                  (struct.unpack_from("<BB", data, 6 + index * 16) for index in range(7))}
+    assert dimensions == {(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)}
+    assert (Path(__file__).resolve().parents[1] / "assets" / "logo" / "ppview-icon.svg").is_file()
     assert window.windowIcon().isNull() is False
 
 

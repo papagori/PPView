@@ -10,6 +10,10 @@ PPView 0.1.4 is a lightweight, local desktop utility for previewing PDF and PDF-
 
 This screenshot was captured from the packaged Windows executable using a local test PDF.
 
+## Branding
+
+The header uses the icon-only document inspection mark with the localized application title and subtitle. The vector lockup, icon, splash preview, and multi-resolution Windows icon are in [`assets/logo`](assets/logo). PNG previews are included there for review. `scripts/generate_logo_assets.py` regenerates the previews and `ppview.ico` from the SVG artwork; the Windows build embeds that ICO in `PPView.exe` and bundles the SVG used by the app window and header.
+
 ## Supported files and limitations
 
 - PDF documents, detected and opened from their content.

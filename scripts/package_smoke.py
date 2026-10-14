@@ -57,7 +57,68 @@ WM_CLOSE = 0x0010
 
 
 def verify_executable_icon(exe: Path):
-    """Confirm Windows can extract the icon resource embedded in PPView.exe."""
+    """Verify the packaged PE icon group and every embedded PNG payload."""
+    import struct
+    import pefile
+
+    ico_path = exe.parents[2] / "assets" / "logo" / "ppview.ico"
+    ico = ico_path.read_bytes()
+    reserved, kind, count = struct.unpack_from("<HHH", ico)
+    if (reserved, kind) != (0, 1):
+        raise RuntimeError("Source logo is not a Windows ICO")
+    source_icons = {}
+    for index in range(count):
+        width, height, _colors, _reserved, _planes, _bpp, length, offset = struct.unpack_from("<BBBBHHII", ico, 6 + index * 16)
+        source_icons[(width or 256, height or 256)] = ico[offset:offset + length]
+    required_sizes = {(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)}
+    if count != len(required_sizes) or not required_sizes.issubset(source_icons):
+        raise RuntimeError(f"Source ICO is missing sizes: {sorted(required_sizes - source_icons.keys())}")
+
+    pe = pefile.PE(str(exe), fast_load=True)
+    pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_RESOURCE']])
+    resources = {entry.id: entry for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries}
+
+    def resource_data(entry):
+        if hasattr(entry, "data"):
+            return entry.data
+        if hasattr(entry, "directory") and entry.directory.entries:
+            return resource_data(entry.directory.entries[0])
+        return None
+
+    group_type = resources.get(pefile.RESOURCE_TYPE['RT_GROUP_ICON'])
+    icon_type = resources.get(pefile.RESOURCE_TYPE['RT_ICON'])
+    if not group_type or not icon_type:
+        raise RuntimeError("PPView.exe is missing RT_GROUP_ICON or RT_ICON resources")
+    groups = [resource_data(entry) for entry in group_type.directory.entries]
+    icons = {entry.id: pe.get_data(resource_data(entry).struct.OffsetToData, resource_data(entry).struct.Size)
+             for entry in icon_type.directory.entries}
+    groups = [entry for entry in groups if entry is not None]
+    if not groups:
+        raise RuntimeError("PPView.exe has no icon group resource")
+    matched = False
+    for group in groups:
+        payload = pe.get_data(group.struct.OffsetToData, group.struct.Size)
+        reserved, kind, group_count = struct.unpack_from("<HHH", payload)
+        if (reserved, kind) != (0, 1):
+            continue
+        embedded = {}
+        for index in range(group_count):
+            width, height, _colors, _reserved, _planes, _bpp, length, icon_id = struct.unpack_from("<BBBBHHIH", payload, 6 + index * 14)
+            size = (width or 256, height or 256)
+            icon_data = icons.get(icon_id)
+            if icon_data is None or len(icon_data) != length:
+                raise RuntimeError(f"PPView.exe icon payload {icon_id} is missing or truncated")
+            embedded[size] = icon_data
+        if required_sizes.issubset(embedded):
+            mismatches = [size for size, data in source_icons.items() if embedded.get(size) != data]
+            if mismatches:
+                raise RuntimeError(f"Packaged icon payloads differ from source ICO at sizes: {mismatches}")
+            matched = True
+            break
+    if not matched:
+        raise RuntimeError("PPView.exe does not embed all expected icon sizes and payloads")
+
+    # Ask Windows' shell extractor as a second check that the resource is usable.
     shell32 = ctypes.windll.shell32
     extract = shell32.ExtractIconExW
     extract.argtypes = [wintypes.LPCWSTR, ctypes.c_int, ctypes.POINTER(wintypes.HANDLE),
@@ -70,6 +131,7 @@ def verify_executable_icon(exe: Path):
     destroy.argtypes = [wintypes.HANDLE]
     if large.value: destroy(large)
     if small.value: destroy(small)
+    print(f"Verified {count} icon images embedded in PPView.exe from {ico_path.name}")
 
 
 def window_for_pid(pid: int):

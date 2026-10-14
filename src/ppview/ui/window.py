@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (QObject, QRunnable, QSettings, Qt, QThreadPool, Signal,
     QPoint, QEvent, QDir, QUrl, QModelIndex, QSize)
-from PySide6.QtGui import QAction, QKeySequence, QPixmap, QDesktopServices, QIcon, QPalette, QColor, QPainter
+from PySide6.QtGui import QAction, QKeySequence, QPixmap, QDesktopServices, QIcon, QPalette, QColor
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
     QToolBar, QVBoxLayout, QWidget, QToolButton, QFileSystemModel, QTreeView,
@@ -355,10 +355,8 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _app_icon():
         import sys
-        svg = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3])) / "assets" / "ppview.svg"
-        renderer = QSvgRenderer(str(svg)); pixmap = QPixmap(64,64); pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap); renderer.render(painter); painter.end()
-        return QIcon(pixmap)
+        svg = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3])) / "assets" / "logo" / "ppview-icon.svg"
+        return QIcon(str(svg))
 
     def _build(self):
         self.setMinimumSize(760, 540)
