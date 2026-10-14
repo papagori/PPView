@@ -34,12 +34,13 @@ jobs:
       - run: python scripts/ui_smoke.py
         env:
           QT_QPA_PLATFORM: offscreen
-      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --paths src --add-data "assets/ppview.svg;assets" src/ppview/main.py
+      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets/ppview.ico --paths src --add-data "assets/ppview.svg;assets" src/ppview/main.py
       - run: python scripts/copy_notices.py dist/PPView
       - shell: pwsh
         run: |
           Copy-Item LICENSE, LICENSES/LGPL-3.0.txt, THIRD_PARTY_LICENSES.md -Destination dist/PPView
           Compress-Archive -Path dist/PPView -DestinationPath dist/PPView-windows-x64.zip -Force
+      - run: python scripts/package_smoke.py
       - uses: actions/upload-artifact@v4
         with:
           name: PPView-windows-x64

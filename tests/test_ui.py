@@ -255,12 +255,83 @@ def test_language_switching_translates_and_persists(window):
     window.lang_combo.setCurrentIndex(2)
     assert window.language == "fr"
     assert window.file_menu.title() == "Fichier"
-    assert window.browser_heading.text() == "Explorateur de fichiers"
+    assert window.browser_heading.text() == "Navigateur"
     assert window.settings.value("language") == "fr"
     window.lang_combo.setCurrentIndex(1)
     assert window.file_menu.title() == "ファイル"
     window.lang_combo.setCurrentIndex(0)
     assert window.file_menu.title() == "File"
+
+
+def test_browser_labels_native_shortcut_and_menus_all_languages(window):
+    from PySide6.QtGui import QKeySequence
+    expected = (("en", "Browser", "File", "Help"),
+                ("ja", "ブラウザー", "ファイル", "ヘルプ"),
+                ("fr", "Navigateur", "Fichier", "Aide"))
+    for language, browser, file_label, help_label in expected:
+        window.language = language
+        window.t = __import__("ppview.i18n.strings", fromlist=["strings"]).strings(language)
+        window._translate()
+        assert window.browser_action.text() == browser
+        assert window.browser_action.toolTip()
+        assert window.file_menu_button.text() == file_label
+        assert window.help_menu_button.text() == help_label
+        assert window.open_action.text() == window.t["open"]
+        assert window.open_action.shortcut() == QKeySequence(QKeySequence.StandardKey.Open)
+        assert "Ctrl+O" not in window.open_action.text()
+        assert window.file_menu.actions()[0] is window.open_action
+        assert window.about_action in window.help_menu.actions()
+        from PySide6.QtGui import QFontMetrics
+        assert window.file_menu.sizeHint().width() >= QFontMetrics(window.font()).horizontalAdvance(window.open_action.text())
+    window.show(); QApplication.processEvents()
+    assert window.file_menu_button.menu() is window.file_menu
+    window.file_menu.popup(window.file_menu_button.mapToGlobal(window.file_menu_button.rect().bottomLeft())); QApplication.processEvents()
+    assert window.file_menu.isVisible()
+    window.file_menu.close()
+    assert window.help_menu_button.menu() is window.help_menu
+    window.help_menu.popup(window.help_menu_button.mapToGlobal(window.help_menu_button.rect().bottomLeft())); QApplication.processEvents()
+    assert window.help_menu.isVisible()
+    window.help_menu.close()
+
+
+def test_toolbar_order_and_right_controls(window):
+    from PySide6.QtWidgets import QToolButton
+    window.resize(1920, 900)
+    window.show()
+    QApplication.processEvents()
+    widgets = [window.group_toolbar_layout.itemAt(i).widget() for i in range(window.group_toolbar_layout.count())]
+    browser_index = next(i for i, w in enumerate(widgets) if isinstance(w, QToolButton) and w.defaultAction() is window.browser_action)
+    panel_index = next(i for i, w in enumerate(widgets) if isinstance(w, QToolButton) and w.defaultAction() is window.panel_action)
+    close_index = next(i for i, w in enumerate(widgets) if isinstance(w, QToolButton) and w.defaultAction() is window.close_document_action)
+    clear_index = next(i for i, w in enumerate(widgets) if isinstance(w, QToolButton) and w.defaultAction() is window.clear_action)
+    assert widgets.index(window.file_menu_button) < browser_index < panel_index
+    assert widgets.index(window.zoom_control) < widgets.index(window.prev) < widgets.index(window.page_label) < widgets.index(window.next)
+    assert widgets.index(window.next) < close_index < clear_index < widgets.index(window.document_combo)
+    outer_widgets = [window.toolbar_layout.itemAt(i).widget() for i in range(window.toolbar_layout.count())]
+    assert outer_widgets.index(window.groups_scroll) < outer_widgets.index(window.help_menu_button) < outer_widgets.index(window.lang_combo)
+    assert window.lang_combo.mapTo(window.toolbar_contents, window.lang_combo.rect().bottomRight()).x() >= window.toolbar_contents.width() - 150
+    assert window.groups_scroll.horizontalScrollBar().maximum() == 0
+    assert window.file_menu_button.height() > 0
+    assert window.brand_header.geometry().left() == window.menuWidget().contentsRect().left()
+    assert window.brand_name.mapTo(window.brand_header, window.brand_name.rect().topLeft()).x() < 100
+
+
+def test_toolbar_overflow_keeps_help_and_language_available(window):
+    window.resize(1920, 900)
+    window.show(); QApplication.processEvents()
+    assert window.groups_scroll.horizontalScrollBar().maximum() == 0
+    window.resize(780, 600); QApplication.processEvents()
+    assert window.groups_scroll.horizontalScrollBar().maximum() > 0
+    assert window.help_menu_button.isVisible() and window.lang_combo.isVisible()
+    assert window.lang_combo.mapTo(window.toolbar_contents, window.lang_combo.rect().bottomRight()).x() <= window.toolbar_contents.width()
+
+
+def test_app_icon_has_multiple_sizes_and_runtime_icon(window):
+    from pathlib import Path
+    icon_path = Path(__file__).resolve().parents[1] / "assets" / "ppview.ico"
+    data = icon_path.read_bytes()
+    assert data[:6] == b"\x00\x00\x01\x00\x07\x00"
+    assert window.windowIcon().isNull() is False
 
 
 def test_preview_wheel_zoom_and_other_controls_keep_wheel_behavior(window, pdf_file):
@@ -285,9 +356,7 @@ def test_preview_wheel_zoom_and_other_controls_keep_wheel_behavior(window, pdf_f
 
 
 def test_toolbar_groups_language_is_last_and_branding_present(window):
-    actions = window.toolbar.actions()
-    widgets = [window.toolbar.widgetForAction(action) for action in actions]
-    assert widgets[-1] is window.lang_combo
+    assert window.toolbar_layout.itemAt(window.toolbar_layout.count() - 1).widget() is window.lang_combo
     assert window.brand_name.text() == "PPView"
     assert window.brand_slogan.text()
     window.show()

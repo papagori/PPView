@@ -1,12 +1,12 @@
 # PPView
 
-PPView 0.1.3 is a lightweight, local desktop utility for previewing PDF and PDF-compatible Adobe Illustrator files before sending them to a commercial printer. It renders the accessible PDF page content with PDFium and helps you spot missing or misplaced visible content. PPView is a preview utility, not a PDF/Illustrator editor or professional preflight application.
+PPView 0.1.4 is a lightweight, local desktop utility for previewing PDF and PDF-compatible Adobe Illustrator files before sending them to a commercial printer. It renders the accessible PDF page content with PDFium and helps you spot missing or misplaced visible content. PPView is a preview utility, not a PDF/Illustrator editor or professional preflight application.
 
 **Nothing in PPView modifies the source document.** All processing is local; the application has no account, telemetry, cloud processing, or upload feature.
 
 ## Screenshots
 
-![PPView 0.1.3 running on Windows with a rendered two-page PDF](assets/screenshots/PPView-v0.1.3.png)
+![PPView 0.1.4 running on Windows with a rendered two-page PDF](assets/screenshots/PPView-v0.1.4.png)
 
 This screenshot was captured from the packaged Windows executable using a local test PDF.
 
@@ -20,7 +20,7 @@ This screenshot was captured from the packaged Windows executable using a local 
 
 ## Use
 
-Open PPView, drag one or more PDF or AI files anywhere in the window, or choose **File > Open Files** / press **Ctrl+O** to select multiple files. New files are appended, duplicate canonical paths are ignored, and the newest file becomes active. Use **File > Open Folder** to browse from a directory, or show the hidden-by-default **File Browser** sidebar to browse local drives and folders. Select multiple files there and choose **Open Selected Files**. The browser starts with collapsed local and connected drive roots, uses lazy filesystem loading, and remembers the last browsed directory and preferred sidebar width. Switch documents from the toolbar selector; use **Close Document** or **Clear All** to remove documents. Fit Page is applied when a document opens. Drag with the left or middle mouse button to pan; ordinary wheel scrolls, and Ctrl+wheel zooms around the pointer. Double-click the preview to fit the page. Enter a zoom percentage directly, use the compact slider, or scroll over the zoom control. The toolbar provides Fit Page, Fit Width, Zoom Out, Zoom In, and page navigation. The Information panel separates document details from basic rendering checks; these do not establish print-production compliance. Choose English, Japanese, or French from the toolbar language selector; the choice is saved, with the Windows language used on first launch when supported. The initial language follows Windows when no saved selection exists. The footer links to the author website, GitHub repository, and GPLv3 license.
+Open PPView, drag one or more PDF or AI files anywhere in the window, or choose **File > Open Files** / press **Ctrl+O** to select multiple files. New files are appended, duplicate canonical paths are ignored, and the newest file becomes active. Use **File > Open Folder** to browse from a directory, or show the hidden-by-default **Browser** sidebar to browse local drives and folders. Select multiple files there and choose **Open Selected Files**. The browser starts with collapsed local and connected drive roots, uses lazy filesystem loading, and remembers the last browsed directory and preferred sidebar width. Switch documents from the toolbar selector; use **Close Document** or **Clear All** to remove documents. Fit Page is applied when a document opens. Drag with the left or middle mouse button to pan; ordinary wheel scrolls, and Ctrl+wheel zooms around the pointer. Double-click the preview to fit the page. Enter a zoom percentage directly, use the compact slider, or scroll over the zoom control. The toolbar provides Fit Page, Fit Width, Zoom Out, Zoom In, and page navigation. The Information panel separates document details from basic rendering checks; these do not establish print-production compliance. Choose English, Japanese, or French from the toolbar language selector; the choice is saved, with the Windows language used on first launch when supported. The initial language follows Windows when no saved selection exists. The footer links to the author website, GitHub repository, and GPLv3 license.
 
 You may also pass a file path when launching `PPView.exe`.
 
@@ -66,4 +66,4 @@ PPView is licensed under GNU GPLv3; see [LICENSE](LICENSE). The GUI uses PySide6
 
 ## Languages and appearance
 
-PPView provides English, Japanese, and French UI translations, with instant switching from the toolbar. The application uses a high-contrast navy and blue theme and includes a compact PPView SVG mark.
+PPView provides English, Japanese, and French UI translations, with instant switching from the toolbar. The application uses a high-contrast navy and blue theme and includes a compact PPView SVG mark. Its Windows application and executable icon is generated from the original SVG at multiple resolutions.

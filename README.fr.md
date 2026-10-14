@@ -1,16 +1,18 @@
 # PPView — Documentation française
 
-PPView 0.1.3 est une application Windows légère qui prévisualise localement les fichiers PDF et Adobe Illustrator contenant du contenu PDF compatible. Elle rend les vraies pages avec PDFium et ne modifie jamais les documents source.
+PPView 0.1.4 est une application Windows légère qui prévisualise localement les fichiers PDF et Adobe Illustrator contenant du contenu PDF compatible. Elle rend les vraies pages avec PDFium et ne modifie jamais les documents source.
 
 Les fichiers PDF et `.ai` compatibles PDF peuvent être ouverts par glisser-déposer, avec **Fichier > Ouvrir des fichiers** (`Ctrl+O`) ou depuis l’explorateur intégré. Les fichiers AI sans représentation PDF accessible ne peuvent pas être prévisualisés. Le rendu PDF peut différer du document Illustrator modifiable. Un affichage réussi ne garantit pas la conformité à l’impression.
 
-L’interface est disponible en anglais, japonais et français. La langue se change dans la barre d’outils et le choix est mémorisé. Le thème bleu nuit et bleu comprend un navigateur de fichiers masqué initialement, des commandes Fit Page/Fit Width, zoom réglable, navigation multipage et panneaux d’informations/contrôles de base.
+L’interface est disponible en anglais, japonais et français. La langue se change dans la barre d’outils et le choix est mémorisé. Le thème bleu nuit et bleu comprend le bouton **Navigateur** (panneau masqué initialement), des commandes Fit Page/Fit Width, zoom réglable, navigation multipage et panneaux d’informations/contrôles de base.
 
 ## Capture d’écran
 
-![PPView 0.1.3 sous Windows, avec un PDF de test affiché](assets/screenshots/PPView-v0.1.3.png)
+![PPView 0.1.4 sous Windows, avec un PDF de test affiché](assets/screenshots/PPView-v0.1.4.png)
 
 Capture réelle de l’application portable Windows.
+
+Captures des libellés de l’interface en [français](assets/screenshots/PPView-v0.1.4-fr.png) et en [japonais](assets/screenshots/PPView-v0.1.4-ja.png).
 
 ## Exécuter depuis les sources
 

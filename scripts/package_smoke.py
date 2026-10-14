@@ -56,6 +56,22 @@ BI_RGB = 0
 WM_CLOSE = 0x0010
 
 
+def verify_executable_icon(exe: Path):
+    """Confirm Windows can extract the icon resource embedded in PPView.exe."""
+    shell32 = ctypes.windll.shell32
+    extract = shell32.ExtractIconExW
+    extract.argtypes = [wintypes.LPCWSTR, ctypes.c_int, ctypes.POINTER(wintypes.HANDLE),
+                        ctypes.POINTER(wintypes.HANDLE), wintypes.UINT]
+    extract.restype = wintypes.UINT
+    large, small = wintypes.HANDLE(), wintypes.HANDLE()
+    if not extract(str(exe), 0, ctypes.byref(large), ctypes.byref(small), 1):
+        raise RuntimeError("PPView.exe has no extractable Windows icon resource")
+    destroy = user32.DestroyIcon
+    destroy.argtypes = [wintypes.HANDLE]
+    if large.value: destroy(large)
+    if small.value: destroy(small)
+
+
 def window_for_pid(pid: int):
     found = []
 
@@ -123,6 +139,7 @@ def main():
     exe = root / "dist" / "PPView" / "PPView.exe"
     if not exe.is_file():
         raise FileNotFoundError(exe)
+    verify_executable_icon(exe)
     package = exe.parent
     for required in ("_internal/pypdfium2_raw/pdfium.dll", "_internal/PySide6/Qt6Core.dll",
                      "_internal/PySide6/Qt6Gui.dll", "_internal/PySide6/Qt6Widgets.dll"):
@@ -177,7 +194,7 @@ def main():
                 ReleaseDC(hwnd, dc)
             if blue_pixels < 50:
                 raise RuntimeError(f"Packaged window did not show rendered blue PDF content ({blue_pixels} sampled pixels)")
-            capture_path = root / "dist" / "PPView-v0.1.3-smoke.png"
+            capture_path = root / "dist" / "PPView-v0.1.4-smoke.png"
             capture_window(hwnd, capture_path)
             safe_title = title.encode("ascii", "replace").decode("ascii")
             print(f"Packaged app opened and rendered the PDF ({blue_pixels} blue samples): {safe_title}")

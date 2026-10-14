@@ -1,6 +1,9 @@
 # PPView
 
-PPView 0.1.3 は、印刷会社へ入稿する前に PDF および PDF 互換コンテンツを含む Adobe Illustrator ファイルを確認するための、軽量なローカルデスクトップアプリです。PDFium を使用して PDF ページの実データを描画し、画像、文字、イラストの欠落や配置を目視確認できます。PDF や Illustrator の編集ソフト、専門的なプリフライトソフトではありません。
+PPView 0.1.4 は、印刷会社へ入稿する前に PDF および PDF 互換コンテンツを含む Adobe Illustrator ファイルを確認するための、軽量なローカルデスクトップアプリです。PDFium を使用して PDF ページの実データを描画し、画像、文字、イラストの欠落や配置を目視確認できます。PDF や Illustrator の編集ソフト、専門的なプリフライトソフトではありません。
+
+![英語表示で PDF をプレビューする PPView 0.1.4](assets/screenshots/PPView-v0.1.4.png)
+インターフェースの [フランス語](assets/screenshots/PPView-v0.1.4-fr.png) と [日本語](assets/screenshots/PPView-v0.1.4-ja.png) のキャプチャもあります。
 
 **元ファイルを変更することはありません。** 処理はすべてローカルで行い、アカウント、テレメトリー、クラウド処理、アップロード機能はありません。
 
