@@ -1,9 +1,13 @@
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import QMimeData, QUrl
+from PySide6.QtCore import QItemSelectionModel
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtTest import QSignalSpy, QTest
 
 from ppview.core.document import inspect_file
@@ -110,3 +114,90 @@ def test_ctrl_wheel_zoom_updates_scale(window, pdf_file):
     window.fit_mode = "manual"
     window._zoom_at(120, 60, 60)
     assert window.zoom == pytest.approx(1.2)
+
+
+def test_drop_on_preview_adds_multiple_files_and_preserves_collection(window, tmp_path):
+    paths = []
+    for filename in ("existing.pdf", "新しい資料.ai"):
+        path = tmp_path / filename
+        path.write_bytes(make_pdf())
+        paths.append(path)
+    first = window._canonical(paths[0])
+    window._drop_files([str(paths[0])])
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(paths[1])), QUrl.fromLocalFile(str(paths[1]))])
+    enter = QDragEnterEvent(QPoint(20, 20), Qt.DropAction.CopyAction, mime,
+                            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(window.preview, enter)
+    assert enter.isAccepted()
+    drop = QDropEvent(QPoint(20, 20), Qt.DropAction.CopyAction, mime,
+                      Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(window.preview, drop)
+    assert drop.isAccepted()
+    assert len(window.documents) == 2
+    assert window._canonical(paths[0]) == first
+    assert window.path == paths[1].resolve()
+    assert window.document_combo.count() == 2
+
+
+def test_unsupported_drop_shows_feedback_without_clearing_documents(window, pdf_file, tmp_path):
+    window.open_files([str(pdf_file)])
+    unsupported = tmp_path / "notes.txt"
+    unsupported.write_text("not a preview document", encoding="utf-8")
+    window._drop_files([str(unsupported)])
+    assert len(window.documents) == 1
+    assert window.statusBar().currentMessage()
+
+
+def test_file_browser_navigation_restores_unicode_directory(window, tmp_path):
+    folder = tmp_path / "印刷資料"
+    folder.mkdir()
+    (folder / "写真.pdf").write_bytes(make_pdf())
+    assert window.browse_directory(folder)
+    assert Path(window.file_model.filePath(window.file_tree.currentIndex())) == folder
+    assert window.settings.value("last_browsed_directory") == str(folder.resolve())
+    window.show()
+    window.browser_action.setChecked(True)
+    assert window.file_browser.isVisible()
+    window.browser_action.setChecked(False)
+
+
+def test_browser_opens_selected_unicode_file(window, tmp_path):
+    path = tmp_path / "表紙.pdf"
+    path.write_bytes(make_pdf())
+    index = window.file_model.index(str(path))
+    window._browser_double_click(index)
+    assert window._canonical(path) in window.documents
+    assert window.path == path.resolve()
+
+
+def test_browser_opens_multiple_selected_files(window, tmp_path):
+    paths = [tmp_path / "a.pdf", tmp_path / "b.ai"]
+    for path in paths: path.write_bytes(make_pdf())
+    indexes = [window.file_model.index(str(path)) for path in paths]
+    for index in indexes:
+        window.file_tree.selectionModel().select(
+            index, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+    window.open_selected_from_browser()
+    assert len(window.documents) == 2
+    assert window.path == paths[-1].resolve()
+
+
+def test_sidebar_changes_preview_viewport_and_footer_links(monkeypatch, window):
+    from ppview.ui.window import QDesktopServices
+    window.show()
+    QApplication.processEvents()
+    before = window.scroll.viewport().width()
+    window.browser_action.setChecked(True)
+    QApplication.processEvents()
+    after = window.scroll.viewport().width()
+    assert window.file_browser.isVisible()
+    assert after < before
+    assert window.copyright_prefix.text() == "© 2026"
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()) or True)
+    QTest.mouseClick(window.author_link, Qt.MouseButton.LeftButton)
+    QTest.mouseClick(window.github_link, Qt.MouseButton.LeftButton)
+    QTest.mouseClick(window.license_link, Qt.MouseButton.LeftButton)
+    assert opened == ["https://www.matthieutuffet.com/", "https://github.com/papagori/PPView",
+                      "https://github.com/papagori/PPView/blob/main/LICENSE"]

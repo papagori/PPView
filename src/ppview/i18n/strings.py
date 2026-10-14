@@ -2,7 +2,7 @@
 from PySide6.QtCore import QLocale, QSettings
 
 EN = {
-"app":"PPView", "file":"File", "open":"Open…", "exit":"Exit", "help":"Help",
+"app":"PPView", "file":"File", "open":"Open Files…", "exit":"Exit", "help":"Help",
 "about":"About PPView", "drop":"Drop a PDF or PDF-compatible Illustrator file here",
 "open_hint":"or use File > Open", "fit_page":"Fit Page", "fit_width":"Fit Width",
 "zoom_out":"Zoom Out", "zoom_in":"Zoom In", "actual":"100%", "previous":"Previous page",
@@ -15,7 +15,7 @@ EN = {
 "ai":"Illustrator (PDF-compatible content)", "empty":"The file is empty.", "invalid":"The file is not a readable PDF document. An .ai file must contain PDF-compatible content.",
 "unreadable":"The file could not be read.", "no_pages":"The document contains no pages.",
 "dimensions_error":"Page dimensions are invalid or unavailable.", "render_error":"A page could not be rendered.",
-"open_title":"Open document", "filter":"PDF and Illustrator files (*.pdf *.ai);;All files (*)",
+"open_title":"Open PDF or Illustrator files", "filter":"PDF and Illustrator files (*.pdf *.ai);;All files (*)",
 "about_text":"A local preview utility for PDF and PDF-compatible Illustrator files. PPView is not a preflight or editing application.",
 "language":"Language", "english":"English", "japanese":"日本語", "page":"Page", "of":"of", "mb":"MB",
 "fit":"Fit", "pages_ok":"Pages accessible; rendering check pending", "shortcut":"Ctrl+O",
@@ -24,11 +24,15 @@ EN = {
 "tip_zoom_out":"Zoom out. Ctrl + mouse wheel also zooms toward the pointer.", "tip_actual":"Show at 100% zoom.",
 "tip_information":"Show or hide document information and basic checks.", "document_information":"Document Information",
 "preflight_checks":"Preflight Checks (basic rendering only)", "basic_only":"Basic file and rendering checks only; print-production compliance is not checked.",
-"close_document":"Close Document", "clear_all":"Clear All", "tip_close":"Close the selected document.",
+"close_document":"Close Current Document", "clear_all":"Clear All", "tip_close":"Close the selected document.",
 "tip_clear":"Close all loaded documents.", "failed":"Failed", "checking":"Checking…",
+"file_browser":"File Browser", "tip_file_browser":"Show or hide the local PDF and Illustrator file browser.",
+"open_folder":"Open Folder…", "choose_folder":"Choose a folder", "open_selected":"Open Selected Files",
+"unsupported_drop":"{count} dropped item(s) skipped. Drop PDF or Illustrator (.ai) files.",
+"unsupported_selected":"Some selected items are not PDF or Illustrator files.", "copyright":"© 2026",
 }
 JA = {
-"app":"PPView", "file":"ファイル", "open":"開く…", "exit":"終了", "help":"ヘルプ",
+"app":"PPView", "file":"ファイル", "open":"ファイルを開く…", "exit":"終了", "help":"ヘルプ",
 "about":"PPView について", "drop":"PDF または PDF 互換 Illustrator ファイルをここにドロップ",
 "open_hint":"または「ファイル > 開く」を選択", "fit_page":"ページ全体", "fit_width":"幅に合わせる",
 "zoom_out":"縮小", "zoom_in":"拡大", "actual":"100%", "previous":"前のページ",
@@ -41,7 +45,7 @@ JA = {
 "ai":"Illustrator（PDF 互換コンテンツ）", "empty":"ファイルが空です。", "invalid":"読み取り可能な PDF ではありません。.ai ファイルには PDF 互換コンテンツが必要です。",
 "unreadable":"ファイルを読み取れませんでした。", "no_pages":"ドキュメントにページがありません。",
 "dimensions_error":"ページサイズが無効か取得できません。", "render_error":"ページを描画できませんでした。",
-"open_title":"ドキュメントを開く", "filter":"PDF / Illustrator ファイル (*.pdf *.ai);;すべてのファイル (*)",
+"open_title":"PDF / Illustrator ファイルを開く", "filter":"PDF / Illustrator ファイル (*.pdf *.ai);;すべてのファイル (*)",
 "about_text":"PDF と PDF 互換 Illustrator ファイルをローカルでプレビューするツールです。プリフライトや編集用のアプリではありません。",
 "language":"言語", "english":"English", "japanese":"日本語", "page":"ページ", "of":"/", "mb":"MB",
 "fit":"フィット", "pages_ok":"ページにアクセス可能。描画チェック待ち", "shortcut":"Ctrl+O",
@@ -50,8 +54,12 @@ JA = {
 "tip_zoom_out":"縮小します。Ctrl + マウスホイールでもポインター位置を中心に縮小できます。", "tip_actual":"100% の倍率で表示します。",
 "tip_information":"ドキュメント情報と基本チェックの表示を切り替えます。", "document_information":"ドキュメント情報",
 "preflight_checks":"プリフライトチェック（基本描画のみ）", "basic_only":"基本的なファイルと描画の確認のみです。印刷用データの適合性は確認しません。",
-"close_document":"ドキュメントを閉じる", "clear_all":"すべて閉じる", "tip_close":"選択中のドキュメントを閉じます。",
+"close_document":"現在のドキュメントを閉じる", "clear_all":"すべて閉じる", "tip_close":"選択中のドキュメントを閉じます。",
 "tip_clear":"読み込んだすべてのドキュメントを閉じます。", "failed":"失敗", "checking":"確認中…",
+"file_browser":"ファイルブラウザー", "tip_file_browser":"PDF と Illustrator ファイルをローカルで参照します。",
+"open_folder":"フォルダーを開く…", "choose_folder":"フォルダーを選択", "open_selected":"選択したファイルを開く",
+"unsupported_drop":"{count} 件を開けませんでした。PDF または Illustrator（.ai）ファイルをドロップしてください。",
+"unsupported_selected":"選択項目に PDF / Illustrator 以外のファイルがあります。", "copyright":"© 2026",
 }
 
 def initial_language() -> str:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ppview"
-version = "0.1.1"
+version = "0.1.2"
 description = "A lightweight local previewer for PDF and PDF-compatible Illustrator files"
 readme = "README.md"
 requires-python = ">=3.10"

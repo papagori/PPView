@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QSettings, Qt, QThreadPool, Signal, QPoint, QEvent
-from PySide6.QtGui import QAction, QKeySequence, QPixmap, QCursor
+from PySide6.QtCore import (QObject, QRunnable, QSettings, Qt, QThreadPool, Signal,
+    QPoint, QEvent, QDir, QUrl, QModelIndex)
+from PySide6.QtGui import QAction, QKeySequence, QPixmap, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
-    QToolBar, QVBoxLayout, QWidget, QToolButton)
+    QToolBar, QVBoxLayout, QWidget, QToolButton, QFileSystemModel, QTreeView,
+    QAbstractItemView)
 
 from ppview.core.document import DocumentError, DocumentInfo, inspect_file, render_page, validate_rendering
 from ppview.i18n.strings import initial_language, strings
@@ -50,6 +52,49 @@ class DropArea(QFrame):
         paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
         if paths: self.files_dropped.emit(paths)
         event.acceptProposedAction()
+
+
+class WindowDropFilter(QObject):
+    """Route supported file drops from any nested window widget."""
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+
+    def eventFilter(self, watched, event):
+        if event.type() not in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop):
+            return False
+        widget = watched if isinstance(watched, QWidget) else None
+        if widget is None or (widget is not self.window and not self.window.isAncestorOf(widget)):
+            return False
+        urls = [url for url in event.mimeData().urls() if url.isLocalFile()] if event.mimeData().hasUrls() else []
+        if not urls:
+            return False
+        if event.type() == QEvent.Type.Drop:
+            self.window._drop_files([url.toLocalFile() for url in urls])
+        event.acceptProposedAction()
+        return True
+
+
+class LinkLabel(QLabel):
+    activated = Signal(str)
+
+    def __init__(self, text: str, url: str, parent=None):
+        super().__init__(text, parent)
+        self.url = url
+        self.setObjectName("footerLink")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(url)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.open_link()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def open_link(self):
+        self.activated.emit(self.url)
+        QDesktopServices.openUrl(QUrl(self.url))
 
 
 class PreviewLabel(QLabel):
@@ -150,8 +195,12 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self.pool.setMaxThreadCount(2)
         self._tasks = set()
+        self.settings = QSettings("papagori", "PPView")
         self._build()
+        self._drop_filter = WindowDropFilter(self)
+        QApplication.instance().installEventFilter(self._drop_filter)
         self._translate()
+        self._restore_browser_directory()
         if initial_file: self.open_files([initial_file])
 
     @staticmethod
@@ -182,6 +231,8 @@ class MainWindow(QMainWindow):
         self.panel_action.setChecked(True)
         self.panel_action.toggled.connect(self._toggle_panel)
         toolbar.addAction(self.panel_action)
+        self.browser_action = QAction(self); self.browser_action.setCheckable(True); self.browser_action.setChecked(False)
+        self.browser_action.toggled.connect(self._toggle_browser); toolbar.addAction(self.browser_action)
         toolbar.addSeparator()
         self.prev = QPushButton(); self.prev.clicked.connect(lambda: self.change_page(-1)); toolbar.addWidget(self.prev)
         self.page_label = QLabel(); toolbar.addWidget(self.page_label)
@@ -193,8 +244,9 @@ class MainWindow(QMainWindow):
         self.close_document_action = QAction(self); self.close_document_action.triggered.connect(self.close_selected_document); toolbar.addAction(self.close_document_action)
         self.clear_action = QAction(self); self.clear_action.triggered.connect(self.clear_all); toolbar.addAction(self.clear_action)
 
+        central = QWidget()
+        central_layout = QVBoxLayout(central); central_layout.setContentsMargins(0, 0, 0, 0); central_layout.setSpacing(0)
         self.splitter = QSplitter()
-        self.setCentralWidget(self.splitter)
         self.drop = DropArea(); self.drop.files_dropped.connect(self._drop_files)
         self.drop_layout = QVBoxLayout(self.drop); self.drop_layout.addStretch()
         self.drop_label = QLabel(); self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.drop_label.setWordWrap(True)
@@ -207,7 +259,27 @@ class MainWindow(QMainWindow):
         self.preview.fit_page.connect(lambda: self.set_view("fit_page"))
         self.scroll.setWidget(self.preview)
         self.preview.hide()
-        self.splitter.addWidget(self.drop); self.splitter.addWidget(self.scroll); self.splitter.setStretchFactor(0, 1); self.splitter.setStretchFactor(1, 4)
+        self.file_model = QFileSystemModel(self)
+        self.file_model.setReadOnly(True)
+        self.file_model.setFilter(QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.Drives | QDir.Filter.NoDotAndDotDot)
+        self.file_model.setNameFilters(["*.pdf", "*.ai"])
+        self.file_model.setNameFilterDisables(False)
+        self.file_model.setRootPath("")
+        self.file_browser = QWidget(); self.file_browser.setMinimumWidth(220)
+        browser_layout = QVBoxLayout(self.file_browser); browser_layout.setContentsMargins(6, 6, 6, 6)
+        self.browser_heading = QLabel(); self.browser_heading.setObjectName("panelHeading"); browser_layout.addWidget(self.browser_heading)
+        self.file_tree = QTreeView(); self.file_tree.setModel(self.file_model); self.file_tree.setRootIndex(QModelIndex())
+        self.file_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.file_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.file_tree.setUniformRowHeights(True); self.file_tree.setAnimated(False)
+        for column in (1, 2, 3): self.file_tree.hideColumn(column)
+        self.file_tree.doubleClicked.connect(self._browser_double_click)
+        self.file_tree.selectionModel().currentChanged.connect(self._browser_current_changed)
+        browser_layout.addWidget(self.file_tree, 1)
+        self.open_selected_button = QPushButton(); self.open_selected_button.clicked.connect(self.open_selected_from_browser); browser_layout.addWidget(self.open_selected_button)
+        self.file_browser.hide()
+        self.splitter.addWidget(self.file_browser); self.splitter.addWidget(self.drop); self.splitter.addWidget(self.scroll)
+        self.splitter.setStretchFactor(0, 0); self.splitter.setStretchFactor(1, 1); self.splitter.setStretchFactor(2, 4)
         self.panel = QWidget(); self.panel.setMinimumWidth(280); self.panel_layout = QVBoxLayout(self.panel)
         self.info_heading = QLabel(); self.info_heading.setObjectName("panelHeading"); self.panel_layout.addWidget(self.info_heading)
         self.details = {}
@@ -218,11 +290,29 @@ class MainWindow(QMainWindow):
             label = QLabel(); label.setWordWrap(True); self.details[key] = label; self.panel_layout.addWidget(label)
         self.panel_layout.addStretch(); self.lang_combo = QComboBox(); self.panel_layout.addWidget(self.lang_combo)
         self.lang_combo.currentIndexChanged.connect(self._language_changed)
-        self.splitter.addWidget(self.panel); self.splitter.setStretchFactor(2, 0)
-        self.splitter.setSizes([190, 820, 280])
+        self.splitter.addWidget(self.panel); self.splitter.setStretchFactor(3, 0)
+        self.splitter.setSizes([0, 190, 820, 280])
         self.scroll.viewport().installEventFilter(self)
+        central_layout.addWidget(self.splitter, 1)
+        footer = QWidget(); footer.setObjectName("footer")
+        footer_layout = QHBoxLayout(footer); footer_layout.setContentsMargins(12, 5, 12, 5); footer_layout.setSpacing(8)
+        self.copyright_prefix = QLabel(); footer_layout.addWidget(self.copyright_prefix)
+        self.author_link = LinkLabel("Matthieu Tuffet", "https://www.matthieutuffet.com/")
+        footer_layout.addWidget(self.author_link); footer_layout.addStretch(1)
+        self.github_link = LinkLabel("GitHub", "https://github.com/papagori/PPView")
+        footer_layout.addWidget(self.github_link)
+        self.footer_separator = QLabel("·"); footer_layout.addWidget(self.footer_separator)
+        self.license_link = LinkLabel("GPLv3", "https://github.com/papagori/PPView/blob/main/LICENSE")
+        footer_layout.addWidget(self.license_link)
+        central_layout.addWidget(footer)
+        self.setCentralWidget(central)
+        for widget in (self, central, self.splitter, self.drop, self.scroll, self.scroll.viewport(),
+                       self.preview, self.file_browser, self.file_tree, self.panel):
+            widget.setAcceptDrops(True)
         menu = self.menuBar().addMenu(""); self.file_menu = menu
         self.open_action = QAction(self); self.open_action.setShortcut(QKeySequence.StandardKey.Open); self.open_action.triggered.connect(self.choose_files); menu.addAction(self.open_action)
+        self.open_folder_action = QAction(self); self.open_folder_action.triggered.connect(self.choose_folder); menu.addAction(self.open_folder_action)
+        menu.addSeparator(); menu.addAction(self.close_document_action); menu.addAction(self.clear_action)
         self.exit_action = QAction(self); self.exit_action.triggered.connect(self.close); menu.addAction(self.exit_action)
         self.help_menu = self.menuBar().addMenu(""); self.about_action = QAction(self); self.about_action.triggered.connect(self.about); self.help_menu.addAction(self.about_action)
         self.setStyleSheet("""
@@ -233,6 +323,9 @@ class MainWindow(QMainWindow):
             QToolBar QToolButton:disabled, QToolBar QPushButton:disabled { color: palette(mid); background: palette(window); }
             QFrame#dropArea { background: palette(base); border: 2px dashed palette(mid); border-radius: 12px; margin: 14px; }
             QLabel#panelHeading { font-weight: 700; padding-top: 8px; }
+            QWidget#footer { background: palette(window); border-top: 1px solid palette(mid); color: palette(window-text); font-size: 9pt; }
+            QLabel#footerLink { color: palette(link); }
+            QLabel#footerLink:hover { color: palette(highlight); text-decoration: underline; }
         """)
         self._document_state(None)
         self._update_document_controls()
@@ -243,12 +336,16 @@ class MainWindow(QMainWindow):
         for key, action in self.actions.items():
             action.setText(t[key]); action.setToolTip(t[f"tip_{key}"])
         self.panel_action.setText(t["information"]); self.panel_action.setToolTip(t["tip_information"])
+        self.browser_action.setText(t["file_browser"]); self.browser_action.setToolTip(t["tip_file_browser"])
         self.close_document_action.setText(t["close_document"]); self.clear_action.setText(t["clear_all"])
         self.close_document_action.setToolTip(t["tip_close"]); self.clear_action.setToolTip(t["tip_clear"])
         self.prev.setText("‹"); self.prev.setToolTip(t["previous"]); self.next.setText("›"); self.next.setToolTip(t["next"])
         self.drop_label.setText(t["drop"]); self.hint_label.setText(t["open_hint"])
+        self.browser_heading.setText(t["file_browser"]); self.open_selected_button.setText(t["open_selected"])
+        self.copyright_prefix.setText(t["copyright"])
         self.info_heading.setText(t["document_information"]); self.check_heading.setText(t["preflight_checks"])
-        self.file_menu.setTitle(t["file"]); self.open_action.setText(t["open"] + "\t" + t["shortcut"]); self.exit_action.setText(t["exit"])
+        self.file_menu.setTitle(t["file"]); self.open_action.setText(t["open"] + "\t" + t["shortcut"])
+        self.open_folder_action.setText(t["open_folder"]); self.exit_action.setText(t["exit"])
         self.help_menu.setTitle(t["help"]); self.about_action.setText(t["about"])
         previous = self.lang_combo.blockSignals(True); self.lang_combo.clear(); self.lang_combo.addItem(t["english"], "en"); self.lang_combo.addItem(t["japanese"], "ja")
         self.lang_combo.setCurrentIndex(0 if self.language == "en" else 1); self.lang_combo.blockSignals(previous)
@@ -265,7 +362,66 @@ class MainWindow(QMainWindow):
         self.panel.setVisible(visible)
         if self.info and self.fit_mode in ("page", "width"): self._render()
 
-    def _drop_files(self, paths): self.open_files(paths)
+    def _toggle_browser(self, visible):
+        self.file_browser.setVisible(visible)
+        if self.info and self.fit_mode in ("page", "width"): self._render()
+
+    def _drop_files(self, paths):
+        accepted = [p for p in paths if Path(p).suffix.lower() in (".pdf", ".ai")]
+        unsupported = [p for p in paths if p not in accepted]
+        if accepted: self.open_files(accepted)
+        if unsupported:
+            self.statusBar().showMessage(self.t["unsupported_drop"].format(count=len(unsupported)), 8000)
+
+    def _browser_current_changed(self, current, _previous):
+        if not current.isValid(): return
+        path = Path(self.file_model.filePath(current))
+        directory = path if self.file_model.isDir(current) else path.parent
+        if directory.is_dir(): self.settings.setValue("last_browsed_directory", str(directory))
+
+    def _restore_browser_directory(self):
+        remembered = self.settings.value("last_browsed_directory", "")
+        path = Path(remembered) if remembered else None
+        if path and path.is_dir(): self.browse_directory(path)
+
+    def browse_directory(self, path):
+        directory = Path(path).expanduser().resolve()
+        if not directory.is_dir(): return False
+        index = self.file_model.index(str(directory))
+        if not index.isValid(): return False
+        ancestors = []
+        current = index.parent()
+        while current.isValid():
+            ancestors.append(current)
+            current = current.parent()
+        for ancestor in reversed(ancestors): self.file_tree.expand(ancestor)
+        self.file_tree.expand(index)
+        self.file_tree.setCurrentIndex(index)
+        self.file_tree.scrollTo(index)
+        self.settings.setValue("last_browsed_directory", str(directory))
+        return True
+
+    def _browser_double_click(self, index):
+        path = Path(self.file_model.filePath(index))
+        if self.file_model.isDir(index):
+            self.settings.setValue("last_browsed_directory", str(path))
+        elif path.suffix.lower() in (".pdf", ".ai"):
+            self.open_file(str(path))
+
+    def open_selected_from_browser(self):
+        paths = [self.file_model.filePath(index) for index in self.file_tree.selectionModel().selectedRows(0)
+                 if not self.file_model.isDir(index)]
+        supported = [p for p in paths if Path(p).suffix.lower() in (".pdf", ".ai")]
+        if supported: self.open_files(supported)
+        if len(supported) < len(paths):
+            self.statusBar().showMessage(self.t["unsupported_selected"], 8000)
+
+    def choose_folder(self):
+        start = self.settings.value("last_browsed_directory", str(Path.home()))
+        directory = QFileDialog.getExistingDirectory(self, self.t["choose_folder"], start)
+        if directory:
+            self.browse_directory(directory)
+            self.browser_action.setChecked(True)
 
     def choose_files(self):
         paths, _ = QFileDialog.getOpenFileNames(self, self.t["open_title"], "", self.t["filter"])
@@ -310,7 +466,20 @@ class MainWindow(QMainWindow):
             self.drop.hide(); self.preview.show(); self._document_state(self.info); self._render(); self._validate_selected()
         else:
             self._document_state(None, loading=True)
+        if self.file_browser.isVisible(): self._highlight_browser_path(self.path)
         self._refresh_document_combo(); self._update_document_controls()
+
+    def _highlight_browser_path(self, path):
+        if not path: return
+        index = self.file_model.index(str(path))
+        if not index.isValid(): return
+        ancestors = []
+        parent = index.parent()
+        while parent.isValid():
+            ancestors.append(parent); parent = parent.parent()
+        for ancestor in reversed(ancestors): self.file_tree.expand(ancestor)
+        self.file_tree.setCurrentIndex(index)
+        self.file_tree.scrollTo(index)
 
     def _select_document(self, index):
         key = self.document_combo.itemData(index) if index >= 0 else None
@@ -328,6 +497,7 @@ class MainWindow(QMainWindow):
         self.documents[key] = info; self._refresh_document_combo()
         if key != (self._canonical(self.path) if self.path else None): return
         self.info = info; self.drop.hide(); self.preview.show(); self.fit_mode = "page"
+        if self.file_browser.isVisible(): self._highlight_browser_path(info.path)
         self._document_state(info); self._render(); self._update_document_controls()
         token = self.token
         self._validate_selected()
@@ -519,3 +689,9 @@ class MainWindow(QMainWindow):
         self._validation_display("failed")
 
     def about(self): QMessageBox.about(self, self.t["about"], self.t["about_text"])
+
+    def closeEvent(self, event):
+        app = QApplication.instance()
+        if app and hasattr(self, "_drop_filter"):
+            app.removeEventFilter(self._drop_filter)
+        super().closeEvent(event)

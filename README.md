@@ -1,6 +1,6 @@
 # PPView
 
-PPView 0.1.1 is a lightweight, local desktop utility for previewing PDF and PDF-compatible Adobe Illustrator files before sending them to a commercial printer. It renders the accessible PDF page content with PDFium and helps you spot missing or misplaced visible content. PPView is a preview utility, not a PDF/Illustrator editor or professional preflight application.
+PPView 0.1.2 is a lightweight, local desktop utility for previewing PDF and PDF-compatible Adobe Illustrator files before sending them to a commercial printer. It renders the accessible PDF page content with PDFium and helps you spot missing or misplaced visible content. PPView is a preview utility, not a PDF/Illustrator editor or professional preflight application.
 
 **Nothing in PPView modifies the source document.** All processing is local; the application has no account, telemetry, cloud processing, or upload feature.
 
@@ -18,7 +18,7 @@ Screenshots will be added when captures from the working application are availab
 
 ## Use
 
-Open PPView, drag one or more PDF or AI files into the window, or choose **File > Open** / press **Ctrl+O** to select multiple files. New files are appended, duplicate canonical paths are ignored, and the newest file becomes active. Switch documents from the toolbar selector; use **Close Document** or **Clear All** to remove documents. Fit Page is applied when a document opens. Drag with the left or middle mouse button to pan; ordinary wheel scrolls, and Ctrl+wheel zooms around the pointer. Double-click the preview to fit the page. The zoom percentage appears beside the zoom controls. The Information panel separates document details from basic rendering checks; these do not establish print-production compliance. Choose English or Japanese in the panel; the choice is saved. The initial language follows Windows when no saved selection exists.
+Open PPView, drag one or more PDF or AI files anywhere in the window, or choose **File > Open Files** / press **Ctrl+O** to select multiple files. New files are appended, duplicate canonical paths are ignored, and the newest file becomes active. Use **File > Open Folder** to browse from a directory, or show the hidden-by-default **File Browser** sidebar to browse local drives and folders. Select multiple files there and choose **Open Selected Files**. The last browsed directory is remembered. Switch documents from the toolbar selector; use **Close Document** or **Clear All** to remove documents. Fit Page is applied when a document opens. Drag with the left or middle mouse button to pan; ordinary wheel scrolls, and Ctrl+wheel zooms around the pointer. Double-click the preview to fit the page. The zoom percentage appears beside the zoom controls. The Information panel separates document details from basic rendering checks; these do not establish print-production compliance. Choose English or Japanese in the panel; the choice is saved. The initial language follows Windows when no saved selection exists. The footer links to the author website, GitHub repository, and GPLv3 license.
 
 You may also pass a file path when launching `PPView.exe`.
 
@@ -49,7 +49,7 @@ On Windows with Python 3.11 installed:
 ./scripts/build_windows.ps1
 ```
 
-The script recreates the project `.venv`, installs the pinned dependencies, runs pytest and the PDFium open/render/close smoke check, and builds the folder distribution at `dist/PPView/` plus `dist/PPView-windows-x64.zip`. GitHub Actions runs tests and creates the same Windows x64 package on pushes to `main`, pull requests, and manual runs; download it from the workflow run's Artifacts section. The package includes the GPL and third-party notices. No Python installation is required to run the packaged application.
+The script recreates the project `.venv`, installs the pinned dependencies, runs pytest and the PDFium open/render/close smoke check, builds the folder distribution at `dist/PPView/` plus `dist/PPView-windows-x64.zip`, then launches the packaged app with a generated PDF and checks the rendered fixture artwork and bundled Qt/PDFium files. GitHub Actions runs tests and creates the same Windows x64 package on pushes to `main`, pull requests, and manual runs; download it from the workflow run's Artifacts section. The package includes the GPL and third-party notices. No Python installation is required to run the packaged application.
 
 ## License and dependencies
 
