@@ -19,6 +19,7 @@ except (AttributeError, OSError):
 
 from PySide6.QtCore import QSettings
 from PySide6.QtGui import QImage, QPainter
+import pikepdf
 
 if sys.platform != "win32":
     raise SystemExit("The packaged executable smoke test requires Windows.")
@@ -186,6 +187,26 @@ def main():
     with tempfile.TemporaryDirectory(prefix="ppview-packaged-") as folder:
         pdf = Path(folder) / "packaged-smoke.pdf"
         pdf.write_bytes(make_pdf(2))
+        # Keep the blue vector sampling target and add a real embedded raster
+        # placement so the packaged pikepdf/QPDF analysis path is exercised.
+        with pikepdf.open(pdf, allow_overwriting_input=True) as sample_pdf:
+            page = sample_pdf.pages[0]
+            resources = page.obj.get("/Resources", pikepdf.Dictionary())
+            xobjects = resources.get("/XObject", pikepdf.Dictionary())
+            image = sample_pdf.make_stream(bytes([40, 170, 220]) * 300 * 300)
+            image.Type = pikepdf.Name.XObject
+            image.Subtype = pikepdf.Name.Image
+            image.Width = 300
+            image.Height = 300
+            image.ColorSpace = pikepdf.Name.DeviceRGB
+            image.BitsPerComponent = 8
+            xobjects["/SmokeImage"] = image
+            resources.XObject = xobjects
+            page.obj.Resources = resources
+            previous = page.obj.Contents.read_bytes()
+            page.obj.Contents = sample_pdf.make_stream(
+                previous + b"\nq 72 0 0 72 400 500 cm /SmokeImage Do Q\n")
+            sample_pdf.save(pdf)
         settings = QSettings("papagori", "PPView")
         had_language = settings.contains("language")
         saved_language = settings.value("language")
@@ -251,6 +272,10 @@ def main():
                             raise RuntimeError("Packaged PDFium render check did not pass")
                         if not any(cid == "document.open" and status == "passed" for cid, status in checks):
                             raise RuntimeError("Packaged pikepdf structure check did not pass")
+                        if preflight["image_count"] < 1 or not any(
+                                item["check_id"].startswith("image.resolution.")
+                                and item["status"] == "passed" for item in preflight["results"]):
+                            raise RuntimeError("Packaged pikepdf image placement/PPI check did not pass")
                         screenshot = QImage(str(window_capture))
                         menu_image = QImage(str(menu_capture))
                         metadata = json.loads(menu_capture.with_suffix(".json").read_text(encoding="utf-8"))
