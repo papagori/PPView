@@ -216,9 +216,11 @@ def main():
                 window_capture = Path(folder) / f"{language}-window.png"
                 menu_capture = Path(folder) / "french-file-menu.png" if language == "fr" else None
                 preflight_capture = Path(folder) / "packaged-preflight.json" if language == "fr" else None
+                image_capture = Path(folder) / f"{language}-image-highlight.png"
                 env = os.environ.copy()
                 env["PATH"] = str(Path(os.environ["WINDIR"]) / "System32") + os.pathsep + str(Path(os.environ["WINDIR"]))
                 env["PPVIEW_SMOKE_WINDOW_CAPTURE"] = str(window_capture)
+                env["PPVIEW_SMOKE_IMAGE_CAPTURE"] = str(image_capture)
                 if menu_capture:
                     env["PPVIEW_SMOKE_MENU_CAPTURE"] = str(menu_capture)
                     env["PPVIEW_SMOKE_PREFLIGHT_CAPTURE"] = str(preflight_capture)
@@ -261,6 +263,14 @@ def main():
                         time.sleep(0.1)
                     if not window_capture.is_file():
                         raise RuntimeError(f"Packaged app did not capture {language} UI")
+                    while time.monotonic() < capture_deadline and not image_capture.is_file():
+                        time.sleep(0.1)
+                    if not image_capture.is_file():
+                        raise RuntimeError(f"Packaged app did not capture the {language} image highlight")
+                    image_path = root / "dist" / f"PPView-v{__version__}-{language}-image-highlight.png"
+                    if not QImage(str(image_capture)).save(str(image_path)):
+                        raise RuntimeError(f"Could not save packaged {language} image-highlight screenshot")
+                    print(f"Packaged {language} image-highlight screenshot: {image_path}")
                     if menu_capture:
                         while time.monotonic() < capture_deadline and not (menu_capture.is_file() and preflight_capture.is_file()):
                             time.sleep(0.1)

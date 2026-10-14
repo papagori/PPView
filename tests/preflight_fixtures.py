@@ -1,6 +1,7 @@
 """Small genuine PDF structures for repeatable preflight tests."""
 from __future__ import annotations
 
+import zlib
 import pikepdf
 
 
@@ -113,5 +114,42 @@ def make_inline_image_pdf(path):
     raw = bytes([0x35, 0x9A, 0xD4]) * 60 * 60
     page.Contents = pdf.make_stream(b"q 14.4 0 0 14.4 10 20 cm BI /W 60 /H 60 /CS /RGB /BPC 8 ID "
                                     + raw + b" EI Q")
+    pdf.save(path); pdf.close()
+    return path
+
+
+def make_large_image_pdf(path):
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    width = height = 3000
+    image = pdf.make_stream(zlib.compress(bytes(width * height)))
+    image.Type = pikepdf.Name.XObject; image.Subtype = pikepdf.Name.Image
+    image.Width = width; image.Height = height
+    image.ColorSpace = pikepdf.Name.DeviceGray; image.BitsPerComponent = 8
+    image.Filter = pikepdf.Name.FlateDecode
+    page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=image))
+    page.Contents = pdf.make_stream(b"300 0 0 300 20 30 cm /Im0 Do")
+    pdf.save(path); pdf.close()
+    return path
+
+
+def make_external_image_pdf(path):
+    pdf = create_pdf(path, image_placements=[(72, 0, 0, 72, 20, 30)])
+    with pikepdf.open(pdf, allow_overwriting_input=True) as document:
+        image = next(iter(document.pages[0].Resources.XObject.values()))
+        image["/F"] = pikepdf.String("linked-image.jpg")
+        document.save(pdf)
+    return path
+
+
+def make_empty_image_pdf(path):
+    pdf = pikepdf.Pdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    image = pdf.make_stream(b"")
+    image.Type = pikepdf.Name.XObject; image.Subtype = pikepdf.Name.Image
+    image.Width = 2; image.Height = 2; image.ColorSpace = pikepdf.Name.DeviceRGB
+    image.BitsPerComponent = 8
+    page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=image))
+    page.Contents = pdf.make_stream(b"2 0 0 2 10 20 cm /Im0 Do")
     pdf.save(path); pdf.close()
     return path

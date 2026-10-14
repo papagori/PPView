@@ -1,6 +1,8 @@
 import pytest
 
-from preflight_fixtures import create_pdf, make_bad_image_pdf, make_inline_image_pdf
+from preflight_fixtures import (create_pdf, make_bad_image_pdf, make_empty_image_pdf,
+                                make_external_image_pdf, make_inline_image_pdf,
+                                make_large_image_pdf)
 from ppview.validation import CheckResult, PreflightSettings, Status, analyze_pdf, run_preflight
 
 
@@ -34,10 +36,13 @@ def test_reused_image_resource_has_each_placement_and_form_placements_are_walked
     reused = create_pdf(tmp_path / "reused.pdf", image_placements=[
         (144, 0, 0, 144, 0, 0), (216, 0, 0, 216, 200, 300)])
     report = analyze_pdf(reused)
-    placements = [r for r in report.results if r.category == "images" and r.check_id.startswith("image.resolution")]
-    assert report.image_count == 2
+    placements = [r for r in report.results if r.check_id.startswith("image.placement")]
+    assert report.image_count == 1
+    assert report.image_placement_count == 2
     assert [r.measurements["effective_ppi"] for r in placements] == pytest.approx([300, 200])
     assert all(r.object_ref for r in placements)
+    assert all(r.details["reuse_status"] == "reused" and r.details["reuse_count"] == 2
+               for r in placements)
     form = create_pdf(tmp_path / "form.pdf", form_image=True,
                       image_placements=[(144, 0, 0, 144, 20, 30)])
     form_report = analyze_pdf(form)
@@ -55,19 +60,79 @@ def test_image_free_and_vector_documents_are_not_defects(tmp_path):
     assert finding(report, "colors.detected").measurements["color_space"] == "DeviceRGB"
 
 
-def test_bad_image_stream_is_not_reported_as_passed(tmp_path):
+def test_bad_image_stream_is_reported_as_present_but_decode_failure(tmp_path):
     report = analyze_pdf(make_bad_image_pdf(tmp_path / "bad-image.pdf"))
-    assert finding(report, "image.decode_failed").status is Status.UNKNOWN
-    resolution = next(r for r in report.results if r.check_id.startswith("image.resolution"))
+    assert report.image_count == report.image_placement_count == 1
+    assert finding(report, "image.present").status is Status.PASSED
+    assert finding(report, "image.data_available").status is Status.PASSED
+    assert finding(report, "image.decode_failed").status is Status.WARNING
+    resolution = next(r for r in report.results if r.check_id.startswith("image.placement"))
     assert resolution.status is Status.WARNING
 
 
-def test_inline_image_reports_effective_ppi_but_decode_as_unknown(tmp_path):
+def test_inline_image_reports_effective_ppi_and_decode_status(tmp_path):
     report = analyze_pdf(make_inline_image_pdf(tmp_path / "inline.pdf"))
-    resolution = next(r for r in report.results if r.check_id.startswith("image.resolution"))
+    resolution = next(r for r in report.results if r.check_id.startswith("image.placement"))
     assert resolution.measurements["effective_ppi"] == pytest.approx(300)
     assert resolution.status is Status.PASSED
-    assert finding(report, "image.inline_decode_unknown").status is Status.UNKNOWN
+    assert resolution.details["image_kind"] == "inline"
+    assert resolution.details["data_availability"] == "available"
+    assert resolution.details["decode_status"] == "decoded"
+    assert finding(report, "image.decode_success").status is Status.PASSED
+
+
+def test_image_measurements_and_crop_rotation_preview_coordinates(tmp_path):
+    boxes = {"CropBox": [50, 100, 500, 700]}
+    path = create_pdf(tmp_path / "crop-rotate.pdf", page_boxes=boxes, rotate=90,
+                      image_placements=[(100, 0, 0, 50, 100, 200)])
+    report = analyze_pdf(path)
+    image = next(r for r in report.results if r.check_id.startswith("image.placement"))
+    assert image.measurements["ppi_x"] == pytest.approx(432)
+    assert image.measurements["ppi_y"] == pytest.approx(864)
+    assert image.measurements["placement_width_mm"] == pytest.approx(100 * 25.4 / 72)
+    assert image.measurements["placement_height_mm"] == pytest.approx(50 * 25.4 / 72)
+    assert image.details["preview_box"] == pytest.approx((1/6, 1/9, 1/4, 1/3))
+    assert image.details["preview_quality"] == "approximate"
+    assert image.details["visible_boundary_verified"] is False
+
+
+def test_large_image_decode_is_skipped_and_not_marked_verified(tmp_path):
+    report = analyze_pdf(make_large_image_pdf(tmp_path / "large-image.pdf"))
+    image = next(r for r in report.results if r.check_id.startswith("image.placement"))
+    assert image.details["data_availability"] == "available"
+    assert image.details["decode_status"] == "skipped"
+    assert finding(report, "image.decode_skipped_large").status is Status.UNKNOWN
+
+
+def test_external_and_missing_image_data_are_not_claimed_as_internal(tmp_path):
+    external = analyze_pdf(make_external_image_pdf(tmp_path / "external.pdf"))
+    external_image = next(r for r in external.results if r.check_id.startswith("image.placement"))
+    assert external_image.details["data_availability"] == "available"
+    assert external_image.details["external_reference"] is True
+    assert finding(external, "image.external_dependency").status is Status.WARNING
+    assert finding(external, "image.data_available").status is Status.PASSED
+    empty = analyze_pdf(make_empty_image_pdf(tmp_path / "empty-image.pdf"))
+    empty_image = next(r for r in empty.results if r.check_id.startswith("image.placement"))
+    assert empty_image.details["data_availability"] == "unavailable"
+    assert finding(empty, "image.data_unavailable").status is Status.UNKNOWN
+
+
+def test_invalid_placement_geometry_is_unknown_not_low_resolution(tmp_path):
+    path = create_pdf(tmp_path / "zero-placement.pdf", image_placements=[(0, 0, 0, 0, 10, 10)])
+    report = analyze_pdf(path)
+    image = next(r for r in report.results if r.check_id.startswith("image.placement"))
+    assert image.status is Status.UNKNOWN
+    assert image.measurements["effective_ppi"] is None
+    assert image.details["preview_box"] is None
+    assert finding(report, "image.geometry_unknown").status is Status.UNKNOWN
+
+
+def test_ai_pdf_image_does_not_claim_native_illustrator_embedding(tmp_path):
+    path = create_pdf(tmp_path / "representation.ai", image_placements=[(72, 0, 0, 72, 0, 0)])
+    report = analyze_pdf(path)
+    image = next(r for r in report.results if r.check_id.startswith("image.placement"))
+    assert image.details["native_illustrator_incorporation"] == "unverified"
+    assert finding(report, "image.ai_native_unverified").status is Status.UNKNOWN
 
 
 def test_font_embedding_and_japanese_cid_resources(tmp_path):

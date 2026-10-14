@@ -3,7 +3,7 @@ import ctypes
 import json
 import os
 from pathlib import Path
-from PySide6.QtCore import QPoint, QTimer
+from PySide6.QtCore import QPoint, QTimer, Qt
 from PySide6.QtWidgets import QApplication
 from ppview.ui.window import MainWindow
 
@@ -18,8 +18,12 @@ def main():
     menu_capture = os.environ.get("PPVIEW_SMOKE_MENU_CAPTURE")
     window_capture = os.environ.get("PPVIEW_SMOKE_WINDOW_CAPTURE")
     preflight_capture = os.environ.get("PPVIEW_SMOKE_PREFLIGHT_CAPTURE")
+    image_capture = os.environ.get("PPVIEW_SMOKE_IMAGE_CAPTURE")
     if preflight_capture:
+        highlight_capture_scheduled = False
+
         def save_preflight_report():
+            nonlocal highlight_capture_scheduled
             active_key = window._canonical(window.path) if window.path else None
             matches = [(settings, report) for (key, settings), report in window.preflight_reports.items()
                        if key == active_key]
@@ -27,11 +31,27 @@ def main():
                 settings, report = matches[-1]
                 payload = {"version": __import__("ppview").__version__,
                            "page_count": report.page_count, "image_count": report.image_count,
+                           "image_placement_count": report.image_placement_count,
                            "font_count": report.font_count,
                            "results": [{"check_id": result.check_id, "category": result.category,
                                         "status": result.status.value, "message_id": result.message_id}
                                        for result in report.results]}
                 Path(preflight_capture).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                if image_capture and not highlight_capture_scheduled:
+                    image_group = window.check_tree.topLevelItem(1)
+                    for index in range(image_group.childCount() if image_group else 0):
+                        item = image_group.child(index)
+                        result = item.data(0, Qt.ItemDataRole.UserRole)
+                        if getattr(result, "check_id", "").startswith("image.placement."):
+                            window._activate_check_item(item, 0)
+                            highlight_capture_scheduled = True
+
+                            def save_image_highlight():
+                                if not window.grab().save(image_capture):
+                                    raise RuntimeError(f"Could not capture image placement highlight at {image_capture}")
+
+                            QTimer.singleShot(650, save_image_highlight)
+                            break
                 return
             QTimer.singleShot(200, save_preflight_report)
 

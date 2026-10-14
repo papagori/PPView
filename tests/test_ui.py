@@ -107,6 +107,17 @@ def test_preview_drag_emits_pan_delta(app, button):
     assert spy.count() >= 1
 
 
+def test_preview_image_highlight_scales_with_the_rendered_page(app):
+    preview = PreviewLabel()
+    preview.resize(200, 100)
+    preview.set_image_highlight((0.1, 0.2, 0.4, 0.6), "Approximate")
+    assert preview.image_highlight_rect() == pytest.approx((20, 20, 80, 60))
+    preview.resize(400, 200)
+    assert preview.image_highlight_rect() == pytest.approx((40, 40, 160, 120))
+    preview.set_image_highlight()
+    assert preview.image_highlight_rect() is None
+
+
 def test_ctrl_wheel_zoom_updates_scale(window, pdf_file):
     window.info = inspect_file(pdf_file)
     window.path = pdf_file.resolve()
@@ -453,9 +464,50 @@ def test_preflight_issue_selects_its_page_without_modifying_pdf(window, multi_pd
     info = inspect_file(multi_pdf); window.info = info; window.path = multi_pdf.resolve()
     rendered = []; monkeypatch.setattr(window, "_render", lambda: rendered.append(window.page))
     result = CheckResult("image.issue", "images", Status.WARNING, "image.resolution_low", page=3,
-                         bounding_box_pt=(10, 20, 30, 40))
+                         bounding_box_pt=(10, 20, 30, 40),
+                         details={"preview_box": (0.1, 0.2, 0.3, 0.4)})
     item = QTreeWidgetItem(); item.setData(0, Qt.ItemDataRole.UserRole, result)
     original = multi_pdf.read_bytes()
     window._activate_check_item(item, 0)
     assert window.page == 2 and rendered == [2]
+    assert window.preview._image_highlight == (0.1, 0.2, 0.3, 0.4)
+    window.change_page(-1)
+    assert window.preview._image_highlight is None
     assert multi_pdf.read_bytes() == original
+
+
+def test_image_placements_are_grouped_and_retranslated_without_reanalysis(window, multi_pdf):
+    from ppview.validation import CheckResult, PreflightReport, Status
+    from ppview.i18n.strings import strings
+
+    parent_id = "image.placement.2.1"
+    result = CheckResult(
+        parent_id, "images", Status.PASSED, "image.resolution_meets", page=2,
+        object_ref="18 0 R", measurements={
+            "placement_index": 1, "width_px": 600, "height_px": 600,
+            "ppi_x": 300, "ppi_y": 300, "effective_ppi": 300,
+            "placement_width_mm": 50.8, "placement_height_mm": 50.8,
+            "target_ppi": 300,
+        }, details={"placement_index": 1, "reuse_status": "reused", "reuse_count": 2,
+                    "preview_box": (0.1, 0.2, 0.4, 0.6),
+                    "preview_quality": "approximate"})
+    children = (
+        CheckResult("image.presence.2.1", "images", Status.PASSED, "image.present", page=2,
+                    details={"parent_id": parent_id, "preview_box": (0.1, 0.2, 0.4, 0.6)}),
+        CheckResult("image.data.2.1", "images", Status.PASSED, "image.data_available", page=2,
+                    details={"parent_id": parent_id, "preview_box": (0.1, 0.2, 0.4, 0.6)}),
+        CheckResult("image.decode.2.1", "images", Status.PASSED, "image.decode_success", page=2,
+                    details={"parent_id": parent_id, "preview_box": (0.1, 0.2, 0.4, 0.6)}),
+    )
+    report = PreflightReport((result, *children), 3, 1, 0, 1)
+    window.info = inspect_file(multi_pdf); window.path = multi_pdf.resolve()
+    window._preflight_display(report)
+    placement = window.check_tree.topLevelItem(1).child(0)
+    assert placement.text(0).startswith("Image #1 — Page 2")
+    assert placement.childCount() == 4  # details plus presence, data, and decode
+    window._activate_check_item(placement, 0)
+    assert window.page == 1
+    assert window.preview._image_highlight == (0.1, 0.2, 0.4, 0.6)
+    window.language = "ja"; window.t = strings("ja")
+    window._preflight_display(report)
+    assert "画像 #1" in window.check_tree.topLevelItem(1).child(0).text(0)

@@ -60,4 +60,5 @@ jobs:
           path: |
             dist/PPView-v*-en.png
             dist/PPView-v*-ja.png
+            dist/PPView-v*-image-highlight.png
           if-no-files-found: error

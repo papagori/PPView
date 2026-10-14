@@ -6,7 +6,7 @@ successful check.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 import math
 from pathlib import Path
@@ -55,6 +55,12 @@ class PreflightReport:
     page_count: int | None
     image_count: int | None
     font_count: int | None
+    image_placement_count: int | None = None
+
+
+_MAX_IMAGE_PIXELS = 8_000_000
+_MAX_IMAGE_STREAM_BYTES = 64 * 1024 * 1024
+_MAX_DECODED_IMAGE_BYTES = 64 * 1024 * 1024
 
 
 def _obj_ref(obj: Any) -> str | None:
@@ -171,6 +177,83 @@ def _transformed_bounds(matrix):
     return bounds if all(math.isfinite(v) for v in bounds) else None
 
 
+def _preview_bounds(matrix, crop, user_unit, rotation):
+    """Normalize the placed image bounds to the rotated CropBox view.
+
+    Bounds are approximate placement bounds: PDF clipping paths are not
+    resolved. The returned tuple is (left, top, right, bottom), each 0..1.
+    """
+    if not crop or user_unit <= 0 or rotation not in (0, 90, 180, 270):
+        return None
+    bounds = _transformed_bounds(matrix)
+    if not bounds:
+        return None
+    x0, y0, x1, y1 = (value * user_unit for value in crop)
+    bx0, by0, bx1, by1 = (value * user_unit for value in bounds)
+    corners = ((bx0, by0), (bx0, by1), (bx1, by0), (bx1, by1))
+    if rotation == 0:
+        points = [(x - x0, y1 - y) for x, y in corners]
+        width, height = x1 - x0, y1 - y0
+    elif rotation == 90:
+        points = [(y - y0, x - x0) for x, y in corners]
+        width, height = y1 - y0, x1 - x0
+    elif rotation == 180:
+        points = [(x1 - x, y - y0) for x, y in corners]
+        width, height = x1 - x0, y1 - y0
+    else:
+        points = [(y1 - y, x1 - x) for x, y in corners]
+        width, height = y1 - y0, x1 - x0
+    if width <= 0 or height <= 0:
+        return None
+    left = min(x for x, _ in points) / width
+    top = min(y for _, y in points) / height
+    right = max(x for x, _ in points) / width
+    bottom = max(y for _, y in points) / height
+    if not all(math.isfinite(value) for value in (left, top, right, bottom)):
+        return None
+    if right <= left or bottom <= top:
+        return None
+    return left, top, right, bottom
+
+
+def _image_stream_state(stream, width, height, bits, color, *, external=False):
+    """Inspect stream availability and decoding without retaining image data."""
+    try:
+        declared_length = int(stream.get("/Length", 0) or 0)
+    except Exception:
+        declared_length = 0
+    if declared_length > _MAX_IMAGE_STREAM_BYTES:
+        return "unknown", "skipped", None, None
+    try:
+        raw = stream.read_raw_bytes()
+    except Exception as exc:
+        return "inaccessible", "not_checked", None, type(exc).__name__
+    raw_length = len(raw)
+    del raw
+    if raw_length > _MAX_IMAGE_STREAM_BYTES:
+        return "unknown", "skipped", raw_length, None
+    if raw_length <= 0:
+        return "unavailable", "not_checked", 0, None
+    # An external-file reference is tracked independently. The bytes in this
+    # PDF stream may still be present, but decoding through the PDF library
+    # does not verify the external dependency itself.
+    if external:
+        return "available", "not_checked", raw_length, None
+
+    components = {"DeviceGray": 1, "CalGray": 1, "DeviceRGB": 3,
+                  "CalRGB": 3, "DeviceCMYK": 4, "ICCBased": 4}.get(color, 4)
+    decoded_estimate = (width * height * components * bits + 7) // 8
+    if (width <= 0 or height <= 0 or bits <= 0 or width * height > _MAX_IMAGE_PIXELS
+            or decoded_estimate > _MAX_DECODED_IMAGE_BYTES):
+        return "available", "skipped", raw_length, None
+    try:
+        decoded = stream.read_bytes()
+        del decoded
+        return "available", "decoded", raw_length, None
+    except Exception as exc:
+        return "available", "failed", raw_length, type(exc).__name__
+
+
 def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSettings()) -> PreflightReport:
     """Inspect accessible PDF structures and return language-neutral findings."""
     path = Path(path)
@@ -196,12 +279,15 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
 
     add("document.open", "document", Status.PASSED, "document.readable")
     image_index = font_index = 0
+    unique_image_keys: set[str] = set()
+    image_reuse_counts: dict[str, int] = {}
+    image_stream_cache: dict[str, tuple[str, str, int | None, str | None]] = {}
     document_font_refs: set[str] = set()
     try:
         page_count = len(pdf.pages)
         if page_count < 1:
             add("document.pages", "document", Status.ERROR, "document.no_pages", severity="error")
-            return PreflightReport(tuple(results), page_count, 0, 0)
+            return PreflightReport(tuple(results), page_count, 0, 0, 0)
         add("document.pages", "document", Status.PASSED, "document.page_count",
             measurements={"count": page_count})
 
@@ -314,6 +400,133 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
             page_colors: set[str] = set()
             content_error = None
 
+            def inspect_image(stream, image_dict, width, height, bits, color, matrix,
+                              *, image_obj=None, inline=False):
+                nonlocal page_images, image_index
+                page_images += 1
+                image_index += 1
+                placement_index = image_index
+                object_ref = _obj_ref(image_obj) if image_obj is not None else None
+                identity = object_ref or f"inline:{page_number}:{placement_index}"
+                unique_image_keys.add(identity)
+                image_reuse_counts[identity] = image_reuse_counts.get(identity, 0) + 1
+                external = not inline and any(key in image_dict for key in ("/F", "/FFilter"))
+                if identity not in image_stream_cache:
+                    image_stream_cache[identity] = _image_stream_state(
+                        stream, width, height, bits, color, external=external)
+                data_state, decode_state, stream_length, decode_error = image_stream_cache[identity]
+
+                a, b, c, d, _e, _f = matrix
+                scale_x = math.hypot(a, b) * user_unit
+                scale_y = math.hypot(c, d) * user_unit
+                placement_width_mm = scale_x * 25.4 / 72 if math.isfinite(scale_x) else None
+                placement_height_mm = scale_y * 25.4 / 72 if math.isfinite(scale_y) else None
+                ppi_x = width * 72 / scale_x if unit_valid and width > 0 and scale_x > 1e-9 else None
+                ppi_y = height * 72 / scale_y if unit_valid and height > 0 and scale_y > 1e-9 else None
+                effective_ppi = None
+                if unit_valid and width > 0 and height > 0:
+                    # The largest singular scale is conservative under shear.
+                    u = (a * user_unit / width, b * user_unit / width)
+                    v = (c * user_unit / height, d * user_unit / height)
+                    g11 = u[0] * u[0] + u[1] * u[1]
+                    g22 = v[0] * v[0] + v[1] * v[1]
+                    g12 = u[0] * v[0] + u[1] * v[1]
+                    largest = math.sqrt(max(0.0, (g11 + g22
+                                                    + math.sqrt((g11-g22)**2 + 4*g12*g12)) / 2))
+                    if largest > 1e-9:
+                        effective_ppi = 72 / largest
+
+                box = _transformed_bounds(matrix)
+                if box and unit_valid:
+                    box = tuple(value * user_unit for value in box)
+                elif not unit_valid:
+                    box = None
+                preview_box = _preview_bounds(matrix, crop, user_unit, rotation) if rotation_valid else None
+                measurements = {
+                    "placement_index": placement_index, "width_px": width, "height_px": height,
+                    "bits_per_component": bits, "color_space": color,
+                    "ppi_x": ppi_x, "ppi_y": ppi_y, "effective_ppi": effective_ppi,
+                    "placement_width_mm": placement_width_mm,
+                    "placement_height_mm": placement_height_mm,
+                    "target_ppi": settings.target_image_ppi,
+                }
+                if stream_length is not None:
+                    measurements["stream_bytes"] = stream_length
+                if effective_ppi is not None and math.isfinite(effective_ppi):
+                    if effective_ppi >= settings.target_image_ppi:
+                        resolution_status, resolution_message, severity = (
+                            Status.PASSED, "image.resolution_meets", "info")
+                    elif effective_ppi < 150:
+                        resolution_status, resolution_message, severity = (
+                            Status.WARNING, "image.resolution_low", "high")
+                    else:
+                        resolution_status, resolution_message, severity = (
+                            Status.WARNING, "image.resolution_below_target", "warning")
+                else:
+                    resolution_status, resolution_message, severity = (
+                        Status.UNKNOWN, "image.resolution_unknown", "unknown")
+
+                parent_id = f"image.placement.{page_number}.{placement_index}"
+                details = {
+                    "_image_identity": identity, "placement_index": placement_index,
+                    "image_kind": "inline" if inline else "xobject",
+                    "pdf_presence": "present", "data_availability": data_state,
+                    "decode_status": decode_state, "external_reference": external,
+                    "reuse_status": "pending", "reuse_count": 0,
+                    "preview_box": preview_box,
+                    "preview_quality": "approximate" if preview_box else "unavailable",
+                    "visible_boundary_verified": False,
+                    "native_illustrator_incorporation": (
+                        "unverified" if path.suffix.lower() == ".ai" else "not_applicable"),
+                    "decode_error_type": decode_error,
+                    "placement_clipping_analyzed": False,
+                }
+                add(parent_id, "images", resolution_status, resolution_message,
+                    page=page_number, obj=image_obj, box=box, measurements=measurements,
+                    details=details, severity=severity)
+                linked_details = {
+                    "parent_id": parent_id, "preview_box": preview_box,
+                    "preview_quality": "approximate" if preview_box else "unavailable",
+                }
+                add(f"image.presence.{page_number}.{placement_index}", "images",
+                    Status.PASSED, "image.present", page=page_number, obj=image_obj,
+                    measurements={"placement_index": placement_index},
+                    details=linked_details)
+                data_status, data_message = {
+                    "available": (Status.PASSED, "image.data_available"),
+                    "external": (Status.WARNING, "image.external_dependency"),
+                    "unknown": (Status.UNKNOWN, "image.data_unknown"),
+                    "unavailable": (Status.UNKNOWN, "image.data_unavailable"),
+                    "inaccessible": (Status.UNKNOWN, "image.data_inaccessible"),
+                }[data_state]
+                add(f"image.data.{page_number}.{placement_index}", "images",
+                    data_status, data_message, page=page_number, obj=image_obj,
+                    measurements={"placement_index": placement_index},
+                    details=linked_details | {"data_availability": data_state,
+                             "external_reference": external})
+                if external:
+                    add(f"image.external.{page_number}.{placement_index}", "images",
+                        Status.WARNING, "image.external_dependency", page=page_number,
+                        obj=image_obj, measurements={"placement_index": placement_index},
+                        details=linked_details | {"external_reference": True}, severity="warning")
+                decode_status, decode_message = {
+                    "decoded": (Status.PASSED, "image.decode_success"),
+                    "failed": (Status.WARNING, "image.decode_failed"),
+                    "skipped": (Status.UNKNOWN, "image.decode_skipped_large"),
+                    "not_checked": (Status.UNKNOWN, "image.decode_not_checked"),
+                }[decode_state]
+                add(f"image.decode.{page_number}.{placement_index}", "images",
+                    decode_status, decode_message, page=page_number, obj=image_obj,
+                    measurements={"placement_index": placement_index},
+                    details=linked_details | {"decode_status": decode_state,
+                             "error_type": decode_error})
+                if preview_box is None:
+                    add(f"image.geometry.{page_number}.{placement_index}", "images",
+                        Status.UNKNOWN, "image.geometry_unknown", page=page_number,
+                        obj=image_obj, box=box,
+                        measurements={"placement_index": placement_index},
+                        details=linked_details, severity="unknown")
+
             def add_fonts(resources):
                 fonts = resources.get("/Font", {})
                 try:
@@ -373,113 +586,22 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
                             walk(xobj, child_resources, _compose(local_matrix, form_matrix),
                                  depth + 1, form_stack + (identity,))
                         elif subtype == "/Image":
-                            page_images += 1; image_index += 1
                             width = int(xobj.get("/Width", 0) or 0)
                             height = int(xobj.get("/Height", 0) or 0)
-                            a, b, c, d, e, f = local_matrix
-                            scale_x = math.hypot(a, b) * user_unit
-                            scale_y = math.hypot(c, d) * user_unit
-                            ppi_x = width * 72 / scale_x if unit_valid and width > 0 and scale_x > 1e-9 else None
-                            ppi_y = height * 72 / scale_y if unit_valid and height > 0 and scale_y > 1e-9 else None
-                            effective_ppi = None
-                            if unit_valid and width > 0 and height > 0:
-                                # The worst principal point-per-pixel scale is
-                                # conservative when a placement includes shear.
-                                u = (a * user_unit / width, b * user_unit / width)
-                                v = (c * user_unit / height, d * user_unit / height)
-                                g11 = u[0] * u[0] + u[1] * u[1]
-                                g22 = v[0] * v[0] + v[1] * v[1]
-                                g12 = u[0] * v[0] + u[1] * v[1]
-                                largest = math.sqrt(max(0.0, (g11 + g22 + math.sqrt((g11-g22)**2 + 4*g12*g12)) / 2))
-                                if largest > 1e-9:
-                                    effective_ppi = 72 / largest
-                            box = _transformed_bounds(local_matrix)
-                            if box and unit_valid:
-                                box = tuple(v * user_unit for v in box)
-                            elif not unit_valid:
-                                box = None
                             color = _space_name(xobj.get("/ColorSpace", "unknown"), resources)
                             page_colors.add(color)
                             bits = int(xobj.get("/BitsPerComponent", 0) or 0)
-                            common = {"width_px": width, "height_px": height,
-                                      "color_space": color, "bits_per_component": bits,
-                                      "ppi_x": ppi_x, "ppi_y": ppi_y,
-                                      "image_count": page_images}
-                            if effective_ppi and math.isfinite(effective_ppi) and ppi_x and ppi_y:
-                                if effective_ppi >= settings.target_image_ppi:
-                                    status, message, severity = Status.PASSED, "image.resolution_meets", "info"
-                                elif effective_ppi < 150:
-                                    status, message, severity = Status.WARNING, "image.resolution_low", "high"
-                                else:
-                                    status, message, severity = Status.WARNING, "image.resolution_below_target", "warning"
-                                add(f"image.resolution.{page_number}.{image_index}", "images", status, message,
-                                    page=page_number, obj=xobj, box=box,
-                                    measurements=common | {"effective_ppi": effective_ppi,
-                                                           "target_ppi": settings.target_image_ppi},
-                                    details={"placement_clipping_analyzed": False}, severity=severity)
-                            else:
-                                add(f"image.resolution.{page_number}.{image_index}", "images", Status.UNKNOWN,
-                                    "image.resolution_unknown", page=page_number, obj=xobj, box=box,
-                                    measurements=common, severity="unknown")
-                            # Decode small image streams to report corrupt image
-                            # filters; avoid allocating unbounded decoded bitmaps.
-                            if width > 0 and height > 0 and width * height <= 8_000_000:
-                                try:
-                                    xobj.read_bytes()
-                                except Exception as exc:
-                                    add(f"image.decode.{page_number}.{image_index}", "images", Status.UNKNOWN,
-                                        "image.decode_failed", page=page_number, obj=xobj,
-                                        measurements=common, details={"error_type": type(exc).__name__},
-                                        severity="unknown")
-                            else:
-                                add(f"image.decode.{page_number}.{image_index}", "images", Status.UNKNOWN,
-                                    "image.decode_skipped_large", page=page_number, obj=xobj,
-                                    measurements=common, severity="unknown")
+                            inspect_image(xobj, xobj, width, height, bits, color, local_matrix,
+                                          image_obj=xobj)
                     elif op == "INLINE IMAGE":
-                        page_images += 1; image_index += 1
                         inline = instruction.iimage
                         image_obj = inline.obj
                         width, height = int(inline.width), int(inline.height)
                         bits = int(inline.bits_per_component or 0)
                         color = _space_name(image_obj.get("/ColorSpace", "unknown"), resources)
                         page_colors.add(color)
-                        a, b, c, d, e, f = local_matrix
-                        scale_x, scale_y = math.hypot(a, b) * user_unit, math.hypot(c, d) * user_unit
-                        ppi_x = width * 72 / scale_x if unit_valid and width > 0 and scale_x > 1e-9 else None
-                        ppi_y = height * 72 / scale_y if unit_valid and height > 0 and scale_y > 1e-9 else None
-                        effective_ppi = None
-                        if unit_valid and width > 0 and height > 0:
-                            u = (a * user_unit / width, b * user_unit / width)
-                            v = (c * user_unit / height, d * user_unit / height)
-                            g11, g22 = u[0]*u[0]+u[1]*u[1], v[0]*v[0]+v[1]*v[1]
-                            g12 = u[0]*v[0]+u[1]*v[1]
-                            largest = math.sqrt(max(0.0, (g11+g22+math.sqrt((g11-g22)**2+4*g12*g12))/2))
-                            if largest > 1e-9: effective_ppi = 72 / largest
-                        common = {"width_px": width, "height_px": height, "bits_per_component": bits,
-                                  "color_space": color, "ppi_x": ppi_x, "ppi_y": ppi_y,
-                                  "image_count": page_images}
-                        box = _transformed_bounds(local_matrix)
-                        if box and unit_valid: box = tuple(v * user_unit for v in box)
-                        elif not unit_valid: box = None
-                        if effective_ppi and math.isfinite(effective_ppi) and ppi_x and ppi_y:
-                            if effective_ppi >= settings.target_image_ppi:
-                                status, message, severity = Status.PASSED, "image.resolution_meets", "info"
-                            elif effective_ppi < 150:
-                                status, message, severity = Status.WARNING, "image.resolution_low", "high"
-                            else:
-                                status, message, severity = Status.WARNING, "image.resolution_below_target", "warning"
-                            add(f"image.resolution.{page_number}.{image_index}", "images", status, message,
-                                page=page_number, box=box,
-                                measurements=common | {"effective_ppi": effective_ppi,
-                                                       "target_ppi": settings.target_image_ppi},
-                                details={"inline": True}, severity=severity)
-                        else:
-                            add(f"image.resolution.{page_number}.{image_index}", "images", Status.UNKNOWN,
-                                "image.resolution_unknown", page=page_number, box=box,
-                                measurements=common, severity="unknown")
-                        add(f"image.decode.{page_number}.{image_index}", "images", Status.UNKNOWN,
-                            "image.inline_decode_unknown", page=page_number, box=box,
-                            measurements=common, severity="unknown")
+                        inspect_image(inline, image_obj, width, height, bits, color, local_matrix,
+                                      inline=True)
 
             try:
                 walk(page, page.resources)
@@ -528,7 +650,24 @@ def analyze_pdf(path: str | Path, settings: PreflightSettings = PreflightSetting
     finally:
         pdf.close()
 
-    return PreflightReport(tuple(results), page_count, image_index, len(document_font_refs))
+    if path.suffix.lower() == ".ai":
+        add("image.ai_native_unverified", "images", Status.UNKNOWN,
+            "image.ai_native_unverified",
+            details={"native_illustrator_incorporation": "unverified"})
+
+    finalized = []
+    for result in results:
+        identity = result.details.get("_image_identity")
+        if identity is not None:
+            details = dict(result.details)
+            details.pop("_image_identity", None)
+            reuse_count = image_reuse_counts.get(identity, 1)
+            details["reuse_count"] = reuse_count
+            details["reuse_status"] = "reused" if reuse_count > 1 else "single"
+            result = replace(result, details=details)
+        finalized.append(result)
+    return PreflightReport(tuple(finalized), page_count, len(unique_image_keys),
+                           len(document_font_refs), image_index)
 
 
 def run_preflight(path: str | Path, settings: PreflightSettings = PreflightSettings()) -> PreflightReport:
@@ -547,5 +686,5 @@ def run_preflight(path: str | Path, settings: PreflightSettings = PreflightSetti
                                 "document.render_failed", {"error_type": type(exc).__name__},
                                 severity="error")
     return PreflightReport((rendering, *report.results), report.page_count,
-                           report.image_count, report.font_count)
+                           report.image_count, report.font_count, report.image_placement_count)
 

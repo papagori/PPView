@@ -4,7 +4,8 @@ from pathlib import Path
 
 from PySide6.QtCore import (QObject, QRunnable, QSettings, Qt, QThreadPool, Signal,
     QPoint, QEvent, QDir, QUrl, QModelIndex, QSize)
-from PySide6.QtGui import QAction, QKeySequence, QPixmap, QDesktopServices, QIcon, QPalette, QColor
+from PySide6.QtGui import (QAction, QKeySequence, QPixmap, QDesktopServices, QIcon,
+                           QPalette, QColor, QPainter, QPen)
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter,
     QToolBar, QVBoxLayout, QWidget, QToolButton, QFileSystemModel, QTreeView,
@@ -117,6 +118,43 @@ class PreviewLabel(QLabel):
         self._drag_pos: QPoint | None = None
         self._drag_button = Qt.MouseButton.NoButton
         self._space_down = False
+        self._image_highlight = None
+        self._image_highlight_tooltip = ""
+
+    def set_image_highlight(self, normalized_box=None, tooltip=""):
+        self._image_highlight = tuple(normalized_box) if normalized_box else None
+        self._image_highlight_tooltip = tooltip or ""
+        self.setToolTip(self._image_highlight_tooltip)
+        self.update()
+
+    def image_highlight_rect(self):
+        if not self._image_highlight:
+            return None
+        left, top, right, bottom = self._image_highlight
+        bounds = self.contentsRect()
+        left, right = max(0.0, min(1.0, left)), max(0.0, min(1.0, right))
+        top, bottom = max(0.0, min(1.0, top)), max(0.0, min(1.0, bottom))
+        if right <= left or bottom <= top:
+            return None
+        return (bounds.left() + left * bounds.width(),
+                bounds.top() + top * bounds.height(),
+                bounds.left() + right * bounds.width(),
+                bounds.top() + bottom * bounds.height())
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        rect = self.image_highlight_rect()
+        if rect is None:
+            return
+        left, top, right, bottom = rect
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setClipRect(self.contentsRect())
+        painter.setPen(QPen(QColor(255, 174, 66), 2, Qt.PenStyle.SolidLine))
+        painter.setBrush(QColor(255, 174, 66, 35))
+        painter.drawRect(left + 1, top + 1, max(0, right - left - 2),
+                         max(0, bottom - top - 2))
+        painter.end()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Space:
@@ -699,6 +737,8 @@ class MainWindow(QMainWindow):
 
     def _select_path(self, key):
         self.token += 1; self.render_serial += 1
+        self._highlight_page = None
+        self.preview.set_image_highlight()
         self.path = self.document_paths.get(key, Path(key)); self.info = self.documents.get(key); self.page = 0
         self.zoom = 1.0; self.fit_mode = "page"
         self.preview.clear(); self.preview.hide()
@@ -752,6 +792,7 @@ class MainWindow(QMainWindow):
         self.preflight_reports = {entry: report for entry, report in self.preflight_reports.items() if entry[0] != key}
         if key != (self._canonical(self.path) if self.path else None): return
         self.info = None; self.preview.clear(); self.drop.show(); self._document_state(None, error=reason)
+        self.preview.set_image_highlight()
         self.path = None; self._update_document_controls()
 
     def close_selected_document(self):
@@ -766,11 +807,13 @@ class MainWindow(QMainWindow):
             self._select_path(target)
         else:
             self.token += 1; self.render_serial += 1; self.path = None; self.info = None; self.page = 0
+            self.preview.set_image_highlight()
             self.preview.clear(); self.preview.hide(); self.drop.show(); self._document_state(None)
             self._refresh_document_combo(); self._update_document_controls()
 
     def clear_all(self):
         self.token += 1; self.render_serial += 1
+        self.preview.set_image_highlight()
         self.documents.clear(); self.document_paths.clear(); self.document_generations.clear(); self.validation.clear(); self.preflight_reports.clear(); self.path = None; self.info = None; self.page = 0
         self.preview.clear(); self.preview.hide(); self.drop.show(); self._document_state(None)
         self._refresh_document_combo(); self._update_document_controls()
@@ -878,13 +921,46 @@ class MainWindow(QMainWindow):
                           f"{counts[Status.ERROR]} ×  {counts[Status.UNKNOWN]} ?")
             group.setForeground(0, QColor("#91a9c3"))
             group.setExpanded(True)
+            image_rows = {}
             for result in findings:
                 message = self._preflight_message(result)
-                row = QTreeWidgetItem(group)
                 status_text = self.t[status_keys[result.status]]
                 if result.severity == "high": status_text = f"{self.t['priority_high']} · {status_text}"
-                row.setText(0, f"{status_text} — {message}")
                 row_color = "#ffad66" if result.severity == "high" else colors[result.status]
+                parent_id = result.details.get("parent_id")
+                if category == "images" and parent_id:
+                    row = image_rows.get(parent_id)
+                    if row is None:
+                        row = QTreeWidgetItem(group)
+                        row.setText(0, message)
+                        row.setExpanded(True)
+                        image_rows[parent_id] = row
+                    child = QTreeWidgetItem(row)
+                    child.setText(0, f"{status_text} — {message}")
+                    child.setForeground(0, QColor(row_color))
+                    child.setToolTip(0, message)
+                    child.setData(0, Qt.ItemDataRole.UserRole, result)
+                    continue
+                if category == "images" and result.check_id.startswith("image.placement."):
+                    label = self.t["image.placement_label"].format(
+                        placement_index=result.details["placement_index"], page=result.page or 0)
+                    row = QTreeWidgetItem(group)
+                    row.setText(0, f"{label} · {status_text} — {message}")
+                    row.setForeground(0, QColor(row_color))
+                    row.setData(0, Qt.ItemDataRole.UserRole, result)
+                    image_rows[result.check_id] = row
+                    summary = self._preflight_details(result)
+                    tooltip = message + ("\n" + summary if summary else "")
+                    row.setToolTip(0, tooltip)
+                    if summary:
+                        detail_item = QTreeWidgetItem(row)
+                        detail_item.setText(0, f"{self.t['details']}: {summary}")
+                        detail_item.setToolTip(0, summary)
+                        detail_item.setForeground(0, QColor("#a8b6c8"))
+                    row.setExpanded(False)
+                    continue
+                row = QTreeWidgetItem(group)
+                row.setText(0, f"{status_text} — {message}")
                 row.setForeground(0, QColor(row_color))
                 row.setToolTip(0, message)
                 row.setData(0, Qt.ItemDataRole.UserRole, result)
@@ -892,6 +968,7 @@ class MainWindow(QMainWindow):
                 if details:
                     detail_item = QTreeWidgetItem(row)
                     detail_item.setText(0, f"{self.t['details']}: {details}")
+                    detail_item.setToolTip(0, details)
                     detail_item.setForeground(0, QColor("#a8b6c8"))
         self.details["diagnostics"].setText(self._preflight_summary(report))
 
@@ -910,6 +987,9 @@ class MainWindow(QMainWindow):
         labels = {
             "width_px": "measure_width_px", "height_px": "measure_height_px",
             "bits_per_component": "measure_bit_depth", "color_space": "measure_color_space",
+            "placement_width_mm": "measure_placement_width",
+            "placement_height_mm": "measure_placement_height",
+            "stream_bytes": "measure_stream_bytes",
             "ppi_x": "measure_ppi_x", "ppi_y": "measure_ppi_y",
             "effective_ppi": "measure_effective_ppi", "target_ppi": "measure_target_ppi",
             "name": "measure_font", "subtype": "measure_font_type", "count": "measure_count",
@@ -921,6 +1001,8 @@ class MainWindow(QMainWindow):
             "rotation": "measure_rotation",
         }
         for name, value in result.measurements.items():
+            if value is None:
+                continue
             if name.endswith("_pt") or name.endswith("_x0") or name.endswith("_y0") or name.endswith("_x1") or name.endswith("_y1"):
                 continue
             label = self.t.get(labels.get(name, "measure_" + name), name.replace("_", " "))
@@ -940,6 +1022,13 @@ class MainWindow(QMainWindow):
         if result.bounding_box_pt:
             box = " × ".join(f"{value:.1f}" for value in result.bounding_box_pt)
             entries.append(f"{self.t['measure_bounds']}: {box} pt")
+        if result.details.get("reuse_status") in ("single", "reused"):
+            reuse = self.t["image_reuse_reused"] if result.details["reuse_status"] == "reused" else self.t["image_reuse_single"]
+            entries.append(f"{self.t['measure_image_reuse']}: {reuse} ({result.details.get('reuse_count', 1)})")
+        if result.details.get("native_illustrator_incorporation") == "unverified":
+            entries.append(self.t["image.ai_native_unverified"])
+        if result.details.get("preview_quality") == "approximate":
+            entries.append(self.t["image.highlight_approximate"])
         return "; ".join(entries)
 
     def _preflight_summary(self, report):
@@ -948,14 +1037,21 @@ class MainWindow(QMainWindow):
         errors = sum(item.status is Status.ERROR for item in results)
         unknown = sum(item.status is Status.UNKNOWN for item in results)
         images = self.t["measure_unknown"] if report.image_count is None else str(report.image_count)
+        placements = (self.t["measure_unknown"] if report.image_placement_count is None
+                      else str(report.image_placement_count))
         fonts = self.t["measure_unknown"] if report.font_count is None else str(report.font_count)
-        return self.t["preflight_summary"].format(images=images, fonts=fonts,
+        return self.t["preflight_summary"].format(unique_images=images, placements=placements, fonts=fonts,
                                                   warnings=warnings, errors=errors, unknown=unknown)
 
     def _activate_check_item(self, item, _column):
         result = item.data(0, Qt.ItemDataRole.UserRole)
         if isinstance(result, CheckResult) and result.page and self.info:
             self.page = max(0, min(len(self.info.pages) - 1, result.page - 1))
+            preview_box = result.details.get("preview_box")
+            self._highlight_page = result.page if preview_box and result.category == "images" else None
+            self.preview.set_image_highlight(
+                preview_box if result.category == "images" else None,
+                self.t["image.highlight_approximate"] if preview_box else "")
             self._update_page_label(); self._update_dimensions(); self._render()
 
     def open_preflight_settings(self):
@@ -1016,6 +1112,10 @@ class MainWindow(QMainWindow):
     def change_page(self, delta):
         if not self.info: return
         self.page = max(0, min(len(self.info.pages) - 1, self.page + delta))
+        highlighted = getattr(self, "_highlight_page", None)
+        if highlighted is not None and highlighted != self.page + 1:
+            self._highlight_page = None
+            self.preview.set_image_highlight()
         self._update_page_label(); self._update_dimensions(); self._render()
 
     def _fit_zoom(self, mode=None):
