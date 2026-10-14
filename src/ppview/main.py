@@ -50,7 +50,7 @@ def main():
                                 if not window.grab().save(image_capture):
                                     raise RuntimeError(f"Could not capture image placement highlight at {image_capture}")
 
-                            QTimer.singleShot(650, save_image_highlight)
+                            QTimer.singleShot(1100, save_image_highlight)
                             break
                 return
             QTimer.singleShot(200, save_preflight_report)

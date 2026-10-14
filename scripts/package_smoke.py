@@ -221,8 +221,9 @@ def main():
                 env["PATH"] = str(Path(os.environ["WINDIR"]) / "System32") + os.pathsep + str(Path(os.environ["WINDIR"]))
                 env["PPVIEW_SMOKE_WINDOW_CAPTURE"] = str(window_capture)
                 env["PPVIEW_SMOKE_IMAGE_CAPTURE"] = str(image_capture)
-                env["PPVIEW_SMOKE_PREFLIGHT_CAPTURE"] = str(
-                    Path(folder) / f"{language}-packaged-preflight.json")
+                locale_preflight = (preflight_capture if preflight_capture else
+                                    Path(folder) / f"{language}-packaged-preflight.json")
+                env["PPVIEW_SMOKE_PREFLIGHT_CAPTURE"] = str(locale_preflight)
                 if menu_capture:
                     env["PPVIEW_SMOKE_MENU_CAPTURE"] = str(menu_capture)
                 process = subprocess.Popen([str(exe), str(pdf)], cwd=exe.parent, env=env)
