@@ -34,7 +34,10 @@ jobs:
       - run: python scripts/ui_smoke.py
         env:
           QT_QPA_PLATFORM: offscreen
-      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets/logo/ppview.ico --paths src --add-data "assets/logo/ppview-icon.svg;assets/logo" src/ppview/main.py
+      - run: python scripts/write_build_info.py ppview-build.json
+      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets/logo/ppview.ico --paths src --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "ppview-build.json;." src/ppview/main.py
+      - shell: pwsh
+        run: Remove-Item ppview-build.json -Force
       - run: python scripts/copy_notices.py dist/PPView
       - shell: pwsh
         run: |
@@ -45,4 +48,9 @@ jobs:
         with:
           name: PPView-windows-x64
           path: dist/PPView-windows-x64.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PPView-french-menu-screenshot
+          path: dist/PPView-v0.1.5-fr-menu.png
           if-no-files-found: error

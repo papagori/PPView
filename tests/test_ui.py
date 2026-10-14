@@ -282,7 +282,10 @@ def test_browser_labels_native_shortcut_and_menus_all_languages(window):
         assert window.file_menu.actions()[0] is window.open_action
         assert window.about_action in window.help_menu.actions()
         from PySide6.QtGui import QFontMetrics
-        assert window.file_menu.sizeHint().width() >= QFontMetrics(window.font()).horizontalAdvance(window.open_action.text())
+        metrics = QFontMetrics(window.file_menu.font())
+        label = metrics.horizontalAdvance(window.open_action.text())
+        shortcut = metrics.horizontalAdvance(window.open_action.shortcut().toString())
+        assert window.file_menu.sizeHint().width() >= label + shortcut + 40
     window.show(); QApplication.processEvents()
     assert window.file_menu_button.menu() is window.file_menu
     window.file_menu.popup(window.file_menu_button.mapToGlobal(window.file_menu_button.rect().bottomLeft())); QApplication.processEvents()
@@ -299,17 +302,27 @@ def test_toolbar_order_and_right_controls(window):
     window.resize(1920, 900)
     window.show()
     QApplication.processEvents()
-    widgets = [window.group_toolbar_layout.itemAt(i).widget() for i in range(window.group_toolbar_layout.count())]
-    browser_index = next(i for i, w in enumerate(widgets) if isinstance(w, QToolButton) and w.defaultAction() is window.browser_action)
-    panel_index = next(i for i, w in enumerate(widgets) if isinstance(w, QToolButton) and w.defaultAction() is window.panel_action)
-    close_index = next(i for i, w in enumerate(widgets) if isinstance(w, QToolButton) and w.defaultAction() is window.close_document_action)
-    clear_index = next(i for i, w in enumerate(widgets) if isinstance(w, QToolButton) and w.defaultAction() is window.clear_action)
-    assert widgets.index(window.file_menu_button) < browser_index < panel_index
-    assert widgets.index(window.zoom_control) < widgets.index(window.prev) < widgets.index(window.page_label) < widgets.index(window.next)
-    assert widgets.index(window.next) < close_index < clear_index < widgets.index(window.document_combo)
+    menus = [window.palette_a_layout.itemAt(i).widget() for i in range(window.palette_a_layout.count())]
+    menu_buttons = [w for w in menus if isinstance(w, QToolButton)]
+    assert menu_buttons[0] is window.file_menu_button
+    assert menu_buttons[1].defaultAction() is window.browser_action
+    assert menu_buttons[2].defaultAction() is window.panel_action
+    assert menu_buttons[3] is window.help_menu_button
+    preview = [window.preview_toolbar_layout.itemAt(i).widget() for i in range(window.preview_toolbar_layout.count())]
+    documents = [window.document_toolbar_layout.itemAt(i).widget() for i in range(window.document_toolbar_layout.count())]
+    assert preview.index(window.zoom_control) < preview.index(window.prev) < preview.index(window.page_label) < preview.index(window.next)
+    assert documents[0].defaultAction() is window.close_document_action
+    assert documents[1].defaultAction() is window.clear_action
+    assert documents[2] is window.document_combo
+    assert window.palette_a.property("paletteName") == "menus"
+    assert window.palette_b.property("paletteName") == "preview"
+    assert window.palette_c.property("paletteName") == "documents"
+    assert window.language_palette.property("paletteName") == "language"
+    assert window.group_toolbar_layout.indexOf(window.palette_a) < window.group_toolbar_layout.indexOf(window.palette_b) < window.group_toolbar_layout.indexOf(window.palette_c)
     outer_widgets = [window.toolbar_layout.itemAt(i).widget() for i in range(window.toolbar_layout.count())]
-    assert outer_widgets.index(window.groups_scroll) < outer_widgets.index(window.help_menu_button) < outer_widgets.index(window.lang_combo)
-    assert window.lang_combo.mapTo(window.toolbar_contents, window.lang_combo.rect().bottomRight()).x() >= window.toolbar_contents.width() - 150
+    assert outer_widgets == [window.groups_scroll, window.language_palette]
+    right = window.language_palette.mapTo(window.toolbar_contents, window.language_palette.rect().bottomRight()).x()
+    assert right == window.toolbar_contents.contentsRect().right()
     assert window.groups_scroll.horizontalScrollBar().maximum() == 0
     assert window.file_menu_button.height() > 0
     assert window.brand_header.geometry().left() == window.menuWidget().contentsRect().left()
@@ -323,7 +336,7 @@ def test_toolbar_overflow_keeps_help_and_language_available(window):
     window.resize(780, 600); QApplication.processEvents()
     assert window.groups_scroll.horizontalScrollBar().maximum() > 0
     assert window.help_menu_button.isVisible() and window.lang_combo.isVisible()
-    assert window.lang_combo.mapTo(window.toolbar_contents, window.lang_combo.rect().bottomRight()).x() <= window.toolbar_contents.width()
+    assert window.language_palette.mapTo(window.toolbar_contents, window.language_palette.rect().bottomRight()).x() == window.toolbar_contents.contentsRect().right()
 
 
 def test_app_icon_has_multiple_sizes_and_runtime_icon(window):
@@ -361,7 +374,7 @@ def test_preview_wheel_zoom_and_other_controls_keep_wheel_behavior(window, pdf_f
 
 
 def test_toolbar_groups_language_is_last_and_branding_present(window):
-    assert window.toolbar_layout.itemAt(window.toolbar_layout.count() - 1).widget() is window.lang_combo
+    assert window.toolbar_layout.itemAt(window.toolbar_layout.count() - 1).widget() is window.language_palette
     assert window.brand_name.text() == "PPView"
     assert window.brand_slogan.text()
     window.show()
@@ -369,6 +382,19 @@ def test_toolbar_groups_language_is_last_and_branding_present(window):
     assert window.brand_header.isVisible()
     assert window.footer.isVisible()
     assert window.footer.geometry().width() > 500
+    assert window.version_label.text() == "PPView v0.1.5"
+
+
+def test_application_version_and_about_diagnostics_are_dynamic(window, monkeypatch):
+    from ppview import __version__
+    from PySide6.QtWidgets import QMessageBox
+    captured = []
+    monkeypatch.setattr(QMessageBox, "about", lambda *args: captured.append(args))
+    window.about()
+    assert window.version_label.text() == f"PPView v{__version__}"
+    assert captured[0][1].endswith(f"v{__version__}")
+    assert f"Version: {__version__}" in captured[0][2]
+    assert "Build commit:" in captured[0][2]
 
 
 def test_all_languages_have_complete_translation_keys():

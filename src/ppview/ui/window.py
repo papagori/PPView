@@ -13,6 +13,8 @@ from PySide6.QtSvg import QSvgRenderer
 
 from ppview.core.document import DocumentError, DocumentInfo, inspect_file, render_page, validate_rendering
 from ppview.i18n.strings import initial_language, strings
+from ppview import __version__
+from ppview.build_info import build_commit
 
 
 class WorkerSignals(QObject):
@@ -299,6 +301,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QWidget { color:#e6eef8; background:#0b1424; }
             QMenuBar,QMenu,QToolBar { background:#101e32; border:0; }
+            QMenu { background:#101e32; border:1px solid #355273; padding:5px; }
+            QMenu::item { padding:7px 14px; }
             QMenuBar::item { padding:5px 9px; } QMenuBar::item:selected,QMenu::item:selected { background:#1d385c; }
             QToolBar { spacing:2px; padding:3px 5px; border-bottom:1px solid #263c59; }
             QToolBar#mainToolbar QToolButton { padding:2px 3px; }
@@ -320,6 +324,10 @@ class MainWindow(QMainWindow):
             QFrame#dropArea { background:#101e32; border:2px dashed #355273; border-radius:10px; margin:14px; }
             QLabel#panelHeading { color:#67c5ff; font-weight:700; padding-top:8px; }
             QToolBar#mainToolbar { border-bottom:1px solid #263c59; padding:3px 9px; }
+            QFrame#toolbarPalette { background:#152943; border:1px solid #294867; border-radius:7px; }
+            QFrame#toolbarPalette QWidget { background:transparent; }
+            QFrame#toolbarPalette QToolButton,QFrame#toolbarPalette QPushButton { background:#1a2e4b; }
+            QWidget#zoomControl { background:transparent; }
             QLabel#brandName { color:#eff7ff; font-size:15pt; font-weight:700; }
             QLabel#brandSlogan { color:#91a9c3; font-size:8pt; }
             QWidget#branding { background:#101e32; }
@@ -347,10 +355,15 @@ class MainWindow(QMainWindow):
         button.setDefaultAction(action)
         return button
 
-    def _toolbar_separator(self):
-        separator = QFrame(); separator.setFrameShape(QFrame.Shape.VLine); separator.setFrameShadow(QFrame.Shadow.Sunken)
-        separator.setFixedWidth(1); separator.setFixedHeight(22)
-        self.group_toolbar_layout.addSpacing(3); self.group_toolbar_layout.addWidget(separator); self.group_toolbar_layout.addSpacing(3)
+    @staticmethod
+    def _toolbar_palette(name: str):
+        palette = QFrame()
+        palette.setObjectName("toolbarPalette")
+        palette.setProperty("paletteName", name)
+        layout = QHBoxLayout(palette)
+        layout.setContentsMargins(5, 3, 5, 3)
+        layout.setSpacing(3)
+        return palette, layout
 
     @staticmethod
     def _app_icon():
@@ -376,41 +389,48 @@ class MainWindow(QMainWindow):
         self.groups_scroll.setWidgetResizable(False); self.groups_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.groups_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.groups_widget = QWidget(); self.group_toolbar_layout = QHBoxLayout(self.groups_widget)
-        self.group_toolbar_layout.setContentsMargins(0,0,0,0); self.group_toolbar_layout.setSpacing(2)
+        self.group_toolbar_layout.setContentsMargins(0,0,0,0); self.group_toolbar_layout.setSpacing(8)
+        self.palette_a, self.palette_a_layout = self._toolbar_palette("menus")
+        self.palette_b, self.preview_toolbar_layout = self._toolbar_palette("preview")
+        self.palette_c, self.document_toolbar_layout = self._toolbar_palette("documents")
+        for palette in (self.palette_a, self.palette_b, self.palette_c):
+            self.group_toolbar_layout.addWidget(palette)
+        self.group_toolbar_layout.addStretch(1)
         self.groups_scroll.setWidget(self.groups_widget); self.toolbar_layout.addWidget(self.groups_scroll, 1)
         toolbar.addWidget(self.toolbar_contents)
         self.actions = {}
         self.file_menu = QMenu(self)
         self.file_menu_button = QToolButton(); self.file_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.file_menu_button.setMenu(self.file_menu); self.group_toolbar_layout.addWidget(self.file_menu_button)
+        self.file_menu_button.setMenu(self.file_menu); self.palette_a_layout.addWidget(self.file_menu_button)
         self.open_action = QAction(self); self.open_action.setShortcut(QKeySequence.StandardKey.Open); self.open_action.triggered.connect(self.choose_files); self.file_menu.addAction(self.open_action)
         self.open_folder_action = QAction(self); self.open_folder_action.triggered.connect(self.choose_folder); self.file_menu.addAction(self.open_folder_action)
         self.file_menu.addSeparator()
-        self.browser_action = QAction(self); self.browser_action.setCheckable(True); self.browser_action.toggled.connect(self._toggle_browser); self.group_toolbar_layout.addWidget(self._action_button(self.browser_action))
-        self.panel_action = QAction(self); self.panel_action.setCheckable(True); self.panel_action.setChecked(True); self.panel_action.toggled.connect(self._toggle_panel); self.group_toolbar_layout.addWidget(self._action_button(self.panel_action))
-        self._toolbar_separator()
+        self.browser_action = QAction(self); self.browser_action.setCheckable(True); self.browser_action.toggled.connect(self._toggle_browser); self.palette_a_layout.addWidget(self._action_button(self.browser_action))
+        self.panel_action = QAction(self); self.panel_action.setCheckable(True); self.panel_action.setChecked(True); self.panel_action.toggled.connect(self._toggle_panel); self.palette_a_layout.addWidget(self._action_button(self.panel_action))
+        self.help_menu = QMenu(self)
+        self.help_menu_button = QToolButton(); self.help_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup); self.help_menu_button.setMenu(self.help_menu); self.palette_a_layout.addWidget(self.help_menu_button)
+        self.about_action = QAction(self); self.about_action.triggered.connect(self.about); self.help_menu.addAction(self.about_action)
         for key in ("fit_page", "fit_width", "zoom_out"):
             action = QAction(self)
             action.triggered.connect(lambda checked=False, k=key: self.set_view(k))
-            self.group_toolbar_layout.addWidget(self._action_button(action))
+            self.preview_toolbar_layout.addWidget(self._action_button(action))
             self.actions[key] = action
-        self.zoom_control = ZoomControl(); self.zoom_control.zoom_requested.connect(self._set_zoom_factor); self.group_toolbar_layout.addWidget(self.zoom_control)
+        self.zoom_control = ZoomControl(); self.zoom_control.zoom_requested.connect(self._set_zoom_factor); self.preview_toolbar_layout.addWidget(self.zoom_control)
         self.zoom_label = self.zoom_control.edit
-        action = QAction(self); action.triggered.connect(lambda: self.set_view("zoom_in")); self.group_toolbar_layout.addWidget(self._action_button(action)); self.actions["zoom_in"] = action
-        self.prev = QPushButton(); self.prev.clicked.connect(lambda: self.change_page(-1)); self.group_toolbar_layout.addWidget(self.prev)
-        self.page_label = QLabel(); self.group_toolbar_layout.addWidget(self.page_label)
-        self.next = QPushButton(); self.next.clicked.connect(lambda: self.change_page(1)); self.group_toolbar_layout.addWidget(self.next)
-        self._toolbar_separator()
-        self.close_document_action = QAction(self); self.close_document_action.triggered.connect(self.close_selected_document); self.group_toolbar_layout.addWidget(self._action_button(self.close_document_action))
-        self.clear_action = QAction(self); self.clear_action.triggered.connect(self.clear_all); self.group_toolbar_layout.addWidget(self._action_button(self.clear_action))
+        action = QAction(self); action.triggered.connect(lambda: self.set_view("zoom_in")); self.preview_toolbar_layout.addWidget(self._action_button(action)); self.actions["zoom_in"] = action
+        self.prev = QPushButton(); self.prev.clicked.connect(lambda: self.change_page(-1)); self.preview_toolbar_layout.addWidget(self.prev)
+        self.page_label = QLabel(); self.preview_toolbar_layout.addWidget(self.page_label)
+        self.next = QPushButton(); self.next.clicked.connect(lambda: self.change_page(1)); self.preview_toolbar_layout.addWidget(self.next)
+        self.close_document_action = QAction(self); self.close_document_action.triggered.connect(self.close_selected_document); self.document_toolbar_layout.addWidget(self._action_button(self.close_document_action))
+        self.clear_action = QAction(self); self.clear_action.triggered.connect(self.clear_all); self.document_toolbar_layout.addWidget(self._action_button(self.clear_action))
         self.document_combo = QComboBox(); self.document_combo.setMinimumWidth(110); self.document_combo.setMaximumWidth(160)
-        self.document_combo.currentIndexChanged.connect(self._select_document); self.group_toolbar_layout.addWidget(self.document_combo)
-        self._toolbar_separator()
-        self.help_menu = QMenu(self)
-        self.help_menu_button = QToolButton(); self.help_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup); self.help_menu_button.setMenu(self.help_menu); self.toolbar_layout.addWidget(self.help_menu_button)
-        self.about_action = QAction(self); self.about_action.triggered.connect(self.about); self.help_menu.addAction(self.about_action)
+        self.document_combo.currentIndexChanged.connect(self._select_document); self.document_toolbar_layout.addWidget(self.document_combo)
+        self.language_palette, language_layout = self._toolbar_palette("language")
+        self.language_palette.setObjectName("languagePalette")
+        self.language_palette.setStyleSheet("QFrame#languagePalette { background:#152943; border:1px solid #294867; border-radius:7px; }")
         self.lang_combo = QComboBox(); self.lang_combo.setMinimumWidth(95); self.lang_combo.setMaximumWidth(120)
-        self.lang_combo.currentIndexChanged.connect(self._language_changed); self.toolbar_layout.addWidget(self.lang_combo)
+        self.lang_combo.currentIndexChanged.connect(self._language_changed); language_layout.addWidget(self.lang_combo)
+        self.toolbar_layout.addWidget(self.language_palette)
         self.toolbar_spacer = self.toolbar_layout
 
         central = QWidget()
@@ -471,7 +491,10 @@ class MainWindow(QMainWindow):
         footer_layout = QHBoxLayout(footer); footer_layout.setContentsMargins(12, 5, 12, 5); footer_layout.setSpacing(8)
         self.copyright_prefix = QLabel(); footer_layout.addWidget(self.copyright_prefix)
         self.author_link = LinkLabel("Matthieu Tuffet", "https://www.matthieutuffet.com/")
-        footer_layout.addWidget(self.author_link); footer_layout.addStretch(1)
+        footer_layout.addWidget(self.author_link)
+        self.footer_left_separator = QLabel("·"); footer_layout.addWidget(self.footer_left_separator)
+        self.version_label = QLabel(); footer_layout.addWidget(self.version_label)
+        footer_layout.addStretch(1)
         self.github_link = LinkLabel("GitHub", "https://github.com/papagori/PPView")
         footer_layout.addWidget(self.github_link)
         self.footer_separator = QLabel("·"); footer_layout.addWidget(self.footer_separator)
@@ -512,6 +535,7 @@ class MainWindow(QMainWindow):
         self.zoom_control.setToolTip(t["tip_zoom"]); self.zoom_control.edit.setToolTip(t["tip_zoom"])
         self.zoom_control.popup.setToolTip(t["tip_zoom"])
         self.copyright_prefix.setText(t["copyright"])
+        self.version_label.setText(f"PPView v{__version__}")
         self.info_heading.setText(t["document_information"]); self.check_heading.setText(t["preflight_checks"])
         self.file_menu_button.setText(t["file"]); self.file_menu_button.setToolTip(t["file"])
         self.help_menu_button.setText(t["help"]); self.help_menu_button.setToolTip(t["help"])
@@ -519,14 +543,13 @@ class MainWindow(QMainWindow):
         self.open_folder_action.setText(t["open_folder"]); self.exit_action.setText(t["exit"])
         self.open_action.setToolTip(t["open"])
         self.open_folder_action.setToolTip(t["open_folder"]); self.exit_action.setToolTip(t["exit"])
+        self._size_file_menu_for_actions()
         self.document_combo.setToolTip(t["tip_file_browser"])
         self.help_menu.setTitle(t["help"]); self.about_action.setText(t["about"])
         previous = self.lang_combo.blockSignals(True); self.lang_combo.clear()
         for label, code in ((t["english"], "en"), (t["japanese"], "ja"), (t["french"], "fr")): self.lang_combo.addItem(label, code)
         self.lang_combo.setCurrentIndex({"en": 0, "ja": 1, "fr": 2}[self.language]); self.lang_combo.setToolTip(t["tip_language"]); self.lang_combo.blockSignals(previous)
-        self.groups_widget.setMinimumWidth(self.group_toolbar_layout.sizeHint().width())
-        self.groups_widget.setMinimumHeight(self.group_toolbar_layout.sizeHint().height())
-        self.groups_widget.updateGeometry()
+        if self.isVisible(): self._update_toolbar_group_width()
         self._document_state(self.info); self._update_document_controls()
 
     def _language_changed(self, index):
@@ -831,6 +854,17 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if self.info and self.fit_mode in ("page", "width"): self._render()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_toolbar_group_width()
+
+    def _update_toolbar_group_width(self):
+        self.group_toolbar_layout.activate()
+        size = self.group_toolbar_layout.sizeHint()
+        self.groups_widget.setMinimumSize(size)
+        self.groups_widget.resize(size)
+        self.groups_widget.updateGeometry()
+
     def eventFilter(self, watched, event):
         if watched is self.scroll.viewport() and event.type() == QEvent.Type.Resize:
             if self.info and self.fit_mode in ("page", "width"): self._render()
@@ -888,7 +922,29 @@ class MainWindow(QMainWindow):
         if token != self.token: return
         self._validation_display("failed")
 
-    def about(self): QMessageBox.about(self, self.t["about"], self.t["about_text"])
+    def _size_file_menu_for_actions(self):
+        """Size the native menu for its translated label and shortcut columns."""
+        self.file_menu.setMinimumWidth(0)
+        self.file_menu.adjustSize()
+        metrics = self.file_menu.fontMetrics()
+        actions = [action for action in self.file_menu.actions() if not action.isSeparator()]
+        label_width = max((metrics.horizontalAdvance(action.text()) for action in actions), default=0)
+        shortcut_width = max((metrics.horizontalAdvance(action.shortcut().toString(QKeySequence.SequenceFormat.NativeText))
+                              for action in actions if action.shortcut()), default=0)
+        style = self.file_menu.style()
+        menu_margin = style.pixelMetric(QStyle.PixelMetric.PM_MenuHMargin, None, self.file_menu)
+        panel_width = style.pixelMetric(QStyle.PixelMetric.PM_MenuPanelWidth, None, self.file_menu)
+        check_column = max(16, style.pixelMetric(QStyle.PixelMetric.PM_IndicatorWidth, None, self.file_menu))
+        # QMenu paints shortcuts in their own trailing column. Include its label,
+        # a 22 logical-pixel gap, the check gutter and style/item padding.
+        required = label_width + check_column + 28 + 2 * (14 + menu_margin + panel_width)
+        if shortcut_width:
+            required += shortcut_width + 22
+        self.file_menu.setMinimumWidth(max(self.file_menu.sizeHint().width(), required))
+
+    def about(self):
+        details = f"{self.t['about_text']}\n\nVersion: {__version__}\nBuild commit: {build_commit()}"
+        QMessageBox.about(self, f"{self.t['about']} v{__version__}", details)
 
     def closeEvent(self, event):
         app = QApplication.instance()

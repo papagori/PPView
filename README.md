@@ -1,6 +1,6 @@
 # PPView
 
-PPView 0.1.4 is a lightweight, local desktop utility for previewing PDF and PDF-compatible Adobe Illustrator files before sending them to a commercial printer. It renders the accessible PDF page content with PDFium and helps you spot missing or misplaced visible content. PPView is a preview utility, not a PDF/Illustrator editor or professional preflight application.
+PPView 0.1.5 is a lightweight, local desktop utility for previewing PDF and PDF-compatible Adobe Illustrator files before sending them to a commercial printer. It renders the accessible PDF page content with PDFium and helps you spot missing or misplaced visible content. PPView is a preview utility, not a PDF/Illustrator editor or professional preflight application.
 
 **Nothing in PPView modifies the source document.** All processing is local; the application has no account, telemetry, cloud processing, or upload feature.
 
