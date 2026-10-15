@@ -213,6 +213,14 @@ def main():
         if not any("pikepdf.libs/qpdf30" in name for name in archive_names):
             raise RuntimeError("Portable ZIP is missing pikepdf's QPDF runtime DLL")
     with tempfile.TemporaryDirectory(prefix="ppview-packaged-") as folder:
+        # Launch the portable app from an actual extraction of the published ZIP,
+        # not just the pre-compression PyInstaller output directory.
+        portable_root = Path(folder) / "portable-extracted"
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(portable_root)
+        portable_exe = portable_root / "PPView" / "PPView.exe"
+        if not portable_exe.is_file():
+            raise FileNotFoundError(f"Extracted portable executable is missing: {portable_exe}")
         pdf = Path(folder) / "packaged-smoke.pdf"
         pdf.write_bytes(make_pdf(2))
         # Keep the blue vector sampling target and add a real embedded raster
@@ -262,7 +270,7 @@ def main():
                 env["PPVIEW_SMOKE_PREFLIGHT_CAPTURE"] = str(locale_preflight)
                 if menu_capture:
                     env["PPVIEW_SMOKE_MENU_CAPTURE"] = str(menu_capture)
-                process = subprocess.Popen([str(exe), str(pdf)], cwd=exe.parent, env=env)
+                process = subprocess.Popen([str(portable_exe), str(pdf)], cwd=portable_exe.parent, env=env)
                 hwnd = None
                 try:
                     deadline = time.monotonic() + 30
@@ -377,7 +385,7 @@ def main():
                         "PPVIEW_SMOKE_WINDOW_READY": str(ready_marker),
                         "PPVIEW_STARTUP_TIMING_FILE": str(timing_file)})
             process_started = time.perf_counter()
-            process = subprocess.Popen([str(exe)], cwd=exe.parent, env=env)
+            process = subprocess.Popen([str(portable_exe)], cwd=portable_exe.parent, env=env)
             hwnd = None
             try:
                 deadline = time.monotonic() + 30
