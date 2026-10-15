@@ -83,22 +83,17 @@ class WindowDropFilter(QObject):
         return True
 
 
-class LinkLabel(QLabel):
+class LinkLabel(QPushButton):
     activated = Signal(str)
 
     def __init__(self, text: str, url: str, parent=None):
         super().__init__(text, parent)
         self.url = url
         self.setObjectName("footerLink")
+        self.setFlat(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(url)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.open_link()
-            event.accept()
-        else:
-            super().mousePressEvent(event)
+        self.clicked.connect(self.open_link)
 
     def open_link(self):
         self.activated.emit(self.url)
@@ -395,18 +390,21 @@ class MainWindow(QMainWindow):
             QFrame#toolbarPalette QWidget { background:transparent; }
             QFrame#toolbarPalette QToolButton,QFrame#toolbarPalette QPushButton { background:#1a2e4b; }
             QWidget#zoomControl { background:transparent; }
-            QLabel#brandName { color:#eff7ff; font-size:15pt; font-weight:700; }
-            QLabel#brandSlogan { color:#91a9c3; font-size:8pt; }
-            QWidget#branding { background:#101e32; }
-            QStatusBar { background:#101e32; border-top:1px solid #263c59; color:#bdcadd; }
-            QWidget#footer { background:#101e32; border-top:1px solid #263c59; color:#bdcadd; font-size:9pt; }
-            QLabel#footerLink { color:#67c5ff; } QLabel#footerLink:hover { color:#a5e1ff; text-decoration:underline; }
+            QLabel#brandName { color:#eff7ff; font-size:15pt; font-weight:700; background:transparent; }
+            QLabel#brandSlogan { color:#a8c0d9; font-size:8pt; background:transparent; }
+            QWidget#branding { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #101e32,stop:0.58 #173453,stop:1 #20517b); border-bottom:1px solid #294867; }
+            QStatusBar { background:#101e32; border:0; color:#bdcadd; }
+            QStatusBar::item { border:0; }
+            QWidget#footer { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #101e32,stop:0.55 #142943,stop:1 #1b4267); color:#bdcadd; font-size:9pt; }
+            QPushButton#footerLink { color:#d7efff; background:rgba(86,189,255,0.10); border:1px solid rgba(103,197,255,0.28); border-radius:8px; padding:2px 9px; }
+            QPushButton#footerLink:hover { color:#ffffff; background:rgba(86,189,255,0.20); border-color:#67c5ff; }
+            QPushButton#footerLink:pressed { color:#ffffff; background:#155a91; border-color:#38aaff; }
             QToolTip { color:#f2f7fc; background:#1a2e4b; border:1px solid #4b7198; }
         """)
 
     def _build_header(self):
         brand = QWidget(); brand.setObjectName("branding")
-        row = QHBoxLayout(brand); row.setContentsMargins(10,2,10,2); row.setSpacing(8)
+        row = QHBoxLayout(brand); row.setContentsMargins(14,2,14,2); row.setSpacing(9)
         icon = QLabel(); icon.setPixmap(self._app_icon().pixmap(34,34)); icon.setFixedSize(34,34); row.addWidget(icon)
         label_box = QWidget(); label_box.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         labels = QVBoxLayout(label_box); labels.setContentsMargins(0,0,0,0); labels.setSpacing(0)
@@ -560,22 +558,21 @@ class MainWindow(QMainWindow):
         self.splitter.setSizes([0, 190, 820, 280])
         self.scroll.viewport().installEventFilter(self)
         central_layout.addWidget(self.splitter, 1)
-        footer = QWidget(); footer.setObjectName("footer"); footer.setFixedHeight(30); self.footer = footer
-        footer_layout = QHBoxLayout(footer); footer_layout.setContentsMargins(12, 5, 12, 5); footer_layout.setSpacing(8)
+        self.statusBar().setSizeGripEnabled(False)
+        footer = QWidget(); footer.setObjectName("footer"); footer.setFixedHeight(34); self.footer = footer
+        footer_layout = QHBoxLayout(footer); footer_layout.setContentsMargins(14, 3, 14, 3); footer_layout.setSpacing(7)
         self.copyright_prefix = QLabel(); footer_layout.addWidget(self.copyright_prefix)
         self.author_link = LinkLabel("Matthieu Tuffet", "https://www.matthieutuffet.com/")
         footer_layout.addWidget(self.author_link)
-        self.footer_left_separator = QLabel("·"); footer_layout.addWidget(self.footer_left_separator)
         self.version_label = QLabel(); footer_layout.addWidget(self.version_label)
         footer_layout.addStretch(1)
         self.github_link = LinkLabel("GitHub", "https://github.com/papagori/PPView")
         footer_layout.addWidget(self.github_link)
-        self.footer_separator = QLabel("·"); footer_layout.addWidget(self.footer_separator)
         self.license_link = LinkLabel("GPLv3", "https://github.com/papagori/PPView/blob/main/LICENSE")
         footer_layout.addWidget(self.license_link)
         footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.statusBar().addWidget(footer, 1)
-        self.statusBar().setMinimumHeight(36)
+        self.statusBar().setMinimumHeight(34)
         self.statusBar().show()
         self.setCentralWidget(central)
         for widget in (self, central, self.splitter, self.drop, self.scroll, self.scroll.viewport(),

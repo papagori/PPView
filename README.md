@@ -1,6 +1,6 @@
 # PPView
 
-PPView 0.2.3 is an independent local desktop viewer for PDFs and Adobe Illustrator `.ai` files that contain PDF-compatible content. It requires no Adobe application, service, account, or scripting API. It renders pages with PDFium and reports a focused set of technical preflight observations. PPView does not edit or repair source files and is not a certified print-production validator.
+PPView 0.2.4 is an independent local desktop viewer for PDFs and Adobe Illustrator `.ai` files that contain PDF-compatible content. It requires no Adobe application, service, account, or scripting API. It renders pages with PDFium and reports a focused set of technical preflight observations. PPView does not edit or repair source files and is not a certified print-production validator.
 
 **Source documents are never modified.** Files stay on the local computer; PPView has no account, telemetry, cloud processing, or upload feature.
 
@@ -54,11 +54,11 @@ The generated fixtures cover image scaling and rotation, form placements, font r
 
 ## Install or use the portable Windows build
 
-For a per-user installation on Windows 10 or 11 x64, run `PPView-Setup-v0.2.3-x64.exe`. Choose an installation folder, select an installer language (English, Japanese, or French), and optionally enable the desktop shortcut. The installer creates a Start Menu shortcut and a standard Windows uninstall entry. It does not change `.ai` or `.pdf` file associations. Uninstall from **Settings > Apps > Installed apps** or the Start Menu; PPView preferences remain in the user profile.
+For a per-user installation on Windows 10 or 11 x64, run `PPView-Setup-v0.2.4-x64.exe`. Choose an installation folder, select an installer language (English, Japanese, or French), and optionally enable the desktop shortcut. The installer creates a Start Menu shortcut and a standard Windows uninstall entry. It does not change `.ai` or `.pdf` file associations. Uninstall from **Settings > Apps > Installed apps** or the Start Menu; PPView preferences remain in the user profile.
 
 The installer is unsigned. Windows SmartScreen may warn that the software is unfamiliar. Verify the SHA-256 checksum file distributed beside the installer before running it.
 
-The portable package is `PPView-Portable-v0.2.3-x64.zip`. Extract the folder anywhere writable and run `PPView/PPView.exe`; no installation or Python runtime is required. Preferences continue to be stored in the current Windows user profile.
+The portable package is `PPView-Portable-v0.2.4-x64.zip`. Extract the folder anywhere writable and run `PPView/PPView.exe`; no installation or Python runtime is required. Preferences continue to be stored in the current Windows user profile.
 
 For the genuine Illustrator document checklist, see [Real AI validation](docs/REAL_AI_VALIDATION.md).
 

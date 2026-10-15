@@ -403,6 +403,11 @@ def test_toolbar_groups_language_is_last_and_branding_present(window):
     assert window.brand_header.isVisible()
     assert window.footer.isVisible()
     assert window.footer.geometry().width() > 500
+    assert not window.statusBar().isSizeGripEnabled()
+    assert "qlineargradient" in window.styleSheet()
+    assert window.author_link.isFlat()
+    assert window.github_link.isFlat()
+    assert window.license_link.isFlat()
     from ppview import __version__
     assert window.version_label.text() == f"PPView v{__version__}"
 

@@ -1,6 +1,6 @@
 # PPView
 
-PPView 0.2.3 est une application de bureau indépendante et locale pour prévisualiser les PDF et les fichiers Adobe Illustrator `.ai` contenant une représentation PDF compatible. Aucun logiciel, service, compte ou API Adobe n’est requis. PDFium rend les pages ; PPView ajoute un ensemble ciblé d’observations techniques de prépresse. L’application ne modifie et ne répare pas les fichiers source. Ce n’est pas un outil certifié de validation de production imprimée.
+PPView 0.2.4 est une application de bureau indépendante et locale pour prévisualiser les PDF et les fichiers Adobe Illustrator `.ai` contenant une représentation PDF compatible. Aucun logiciel, service, compte ou API Adobe n’est requis. PDFium rend les pages ; PPView ajoute un ensemble ciblé d’observations techniques de prépresse. L’application ne modifie et ne répare pas les fichiers source. Ce n’est pas un outil certifié de validation de production imprimée.
 
 **Les documents source ne sont jamais modifiés.** Les fichiers restent sur l’ordinateur ; PPView n’utilise ni compte, télémétrie, traitement cloud ou téléversement.
 
@@ -49,11 +49,11 @@ Les PDF de test sont générés automatiquement et couvrent notamment l’échel
 
 ## Installation Windows et version portable
 
-Sous Windows 10 ou 11 x64, lancez `PPView-Setup-v0.2.3-x64.exe` pour une installation par utilisateur. Choisissez le dossier, la langue de l’installateur (anglais, japonais ou français) et, si souhaité, le raccourci du bureau. Un raccourci du menu Démarrer et une entrée de désinstallation Windows sont créés. Les associations `.ai` et `.pdf` ne sont pas modifiées. Désinstallez depuis **Paramètres > Applications > Applications installées** ; les préférences du profil utilisateur sont conservées.
+Sous Windows 10 ou 11 x64, lancez `PPView-Setup-v0.2.4-x64.exe` pour une installation par utilisateur. Choisissez le dossier, la langue de l’installateur (anglais, japonais ou français) et, si souhaité, le raccourci du bureau. Un raccourci du menu Démarrer et une entrée de désinstallation Windows sont créés. Les associations `.ai` et `.pdf` ne sont pas modifiées. Désinstallez depuis **Paramètres > Applications > Applications installées** ; les préférences du profil utilisateur sont conservées.
 
 L’installateur n’est pas signé. SmartScreen peut signaler un logiciel peu connu. Vérifiez le SHA-256 fourni à côté du programme d’installation.
 
-La version portable est `PPView-Portable-v0.2.3-x64.zip`. Extrayez-la dans un dossier accessible et lancez `PPView/PPView.exe`. Python n’est pas requis ; les préférences restent dans le profil Windows de l’utilisateur.
+La version portable est `PPView-Portable-v0.2.4-x64.zip`. Extrayez-la dans un dossier accessible et lancez `PPView/PPView.exe`. Python n’est pas requis ; les préférences restent dans le profil Windows de l’utilisateur.
 
 Consultez la [liste de validation de vrais fichiers Illustrator](docs/REAL_AI_VALIDATION.md).
 
