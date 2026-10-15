@@ -392,10 +392,12 @@ class MainWindow(QMainWindow):
             QWidget#zoomControl { background:transparent; }
             QLabel#brandName { color:#eff7ff; font-size:15pt; font-weight:700; background:transparent; }
             QLabel#brandSlogan { color:#a8c0d9; font-size:8pt; background:transparent; }
+            QWidget#branding QLabel,QWidget#brandLabels { background:transparent; }
             QWidget#branding { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #101e32,stop:0.58 #173453,stop:1 #20517b); border-bottom:1px solid #294867; }
             QStatusBar { background:#101e32; border:0; color:#bdcadd; }
             QStatusBar::item { border:0; }
             QWidget#footer { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #101e32,stop:0.55 #142943,stop:1 #1b4267); color:#bdcadd; font-size:9pt; }
+            QWidget#footer QLabel { background:transparent; }
             QPushButton#footerLink { color:#d7efff; background:rgba(86,189,255,0.10); border:1px solid rgba(103,197,255,0.28); border-radius:8px; padding:2px 9px; }
             QPushButton#footerLink:hover { color:#ffffff; background:rgba(86,189,255,0.20); border-color:#67c5ff; }
             QPushButton#footerLink:pressed { color:#ffffff; background:#155a91; border-color:#38aaff; }
@@ -406,7 +408,7 @@ class MainWindow(QMainWindow):
         brand = QWidget(); brand.setObjectName("branding")
         row = QHBoxLayout(brand); row.setContentsMargins(14,2,14,2); row.setSpacing(9)
         icon = QLabel(); icon.setPixmap(self._app_icon().pixmap(34,34)); icon.setFixedSize(34,34); row.addWidget(icon)
-        label_box = QWidget(); label_box.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        label_box = QWidget(); label_box.setObjectName("brandLabels"); label_box.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         labels = QVBoxLayout(label_box); labels.setContentsMargins(0,0,0,0); labels.setSpacing(0)
         self.brand_name = QLabel("PPView"); self.brand_name.setObjectName("brandName")
         self.brand_slogan = QLabel(); self.brand_slogan.setObjectName("brandSlogan")
