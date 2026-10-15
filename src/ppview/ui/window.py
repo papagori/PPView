@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import (QObject, QRunnable, QSettings, Qt, QThreadPool, Signal,
-    QPoint, QEvent, QDir, QUrl, QModelIndex, QSize)
+    QPoint, QEvent, QDir, QUrl, QModelIndex, QSize, QTimer)
 from PySide6.QtGui import (QAction, QKeySequence, QPixmap, QDesktopServices, QIcon,
                            QPalette, QColor, QPainter, QPen)
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
@@ -13,11 +13,13 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHB
     QTreeWidget, QTreeWidgetItem, QDialog, QDialogButtonBox, QFormLayout)
 from PySide6.QtSvg import QSvgRenderer
 
-from ppview.core.document import DocumentError, DocumentInfo, inspect_file, render_page, validate_rendering
+from ppview.core.document import (DocumentError, DocumentInfo, MAX_RENDER_DIMENSION,
+    MAX_RENDER_PIXELS, inspect_file, render_page_result, release_document, validate_rendering)
 from ppview.i18n.strings import initial_language, strings
 from ppview import __version__
 from ppview.build_info import build_commit
 from ppview.validation import CheckResult, PreflightReport, PreflightSettings, Status, run_preflight
+from ppview.ui.help_dialogs import AboutDialog, UserGuideDialog
 
 
 class WorkerSignals(QObject):
@@ -321,6 +323,18 @@ class MainWindow(QMainWindow):
         self.token = 0
         self.render_serial = 0
         self._pending_zoom_anchor = None
+        self._render_busy = False
+        self._render_pending = False
+        self._render_active_serial = None
+        self._render_requests = 0
+        self._pdfium_render_started = 0
+        self._render_completed = 0
+        self._render_limited = False
+        self._final_pixmap = None
+        self._final_zoom = 1.0
+        self._debounce_ms = 150
+        self._zoom_timer = QTimer(self); self._zoom_timer.setSingleShot(True)
+        self._zoom_timer.setInterval(self._debounce_ms); self._zoom_timer.timeout.connect(self._render)
         self.pool = QThreadPool.globalInstance()
         self.pool.setMaxThreadCount(2)
         self._tasks = set()
@@ -463,6 +477,7 @@ class MainWindow(QMainWindow):
         self.panel_action = QAction(self); self.panel_action.setCheckable(True); self.panel_action.setChecked(True); self.panel_action.toggled.connect(self._toggle_panel); self.palette_a_layout.addWidget(self._action_button(self.panel_action))
         self.help_menu = QMenu(self)
         self.help_menu_button = QToolButton(); self.help_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup); self.help_menu_button.setMenu(self.help_menu); self.palette_a_layout.addWidget(self.help_menu_button)
+        self.guide_action = QAction(self); self.guide_action.triggered.connect(self.user_guide); self.help_menu.addAction(self.guide_action)
         self.about_action = QAction(self); self.about_action.triggered.connect(self.about); self.help_menu.addAction(self.about_action)
         for key in ("fit_page", "fit_width", "zoom_out"):
             action = QAction(self)
@@ -604,7 +619,7 @@ class MainWindow(QMainWindow):
         self.open_folder_action.setToolTip(t["open_folder"]); self.exit_action.setToolTip(t["exit"])
         self._size_file_menu_for_actions()
         self.document_combo.setToolTip(t["tip_file_browser"])
-        self.help_menu.setTitle(t["help"]); self.about_action.setText(t["about"])
+        self.help_menu.setTitle(t["help"]); self.about_action.setText(t["about"]); self.guide_action.setText(t["guide"])
         previous = self.lang_combo.blockSignals(True); self.lang_combo.clear()
         for label, code in ((t["english"], "en"), (t["japanese"], "ja"), (t["french"], "fr")): self.lang_combo.addItem(label, code)
         self.lang_combo.setCurrentIndex({"en": 0, "ja": 1, "fr": 2}[self.language]); self.lang_combo.setToolTip(t["tip_language"]); self.lang_combo.blockSignals(previous)
@@ -736,11 +751,14 @@ class MainWindow(QMainWindow):
         self.document_combo.blockSignals(False)
 
     def _select_path(self, key):
+        self._zoom_timer.stop(); self._render_pending = False
         self.token += 1; self.render_serial += 1
         self._highlight_page = None
         self.preview.set_image_highlight()
         self.path = self.document_paths.get(key, Path(key)); self.info = self.documents.get(key); self.page = 0
         self.zoom = 1.0; self.fit_mode = "page"
+        self._final_pixmap = None
+        self._render_limited = False
         self.preview.clear(); self.preview.hide()
         self.drop.setVisible(self.info is None)
         if self.info:
@@ -785,6 +803,7 @@ class MainWindow(QMainWindow):
 
     def _failed_document(self, key, reason):
         if key not in self.documents: return
+        release_document(self.document_paths.get(key, Path(key)))
         self.documents.pop(key); self._refresh_document_combo()
         self.document_paths.pop(key, None)
         self.document_generations.pop(key, None)
@@ -798,8 +817,9 @@ class MainWindow(QMainWindow):
     def close_selected_document(self):
         if not self.path: return
         key = self._canonical(self.path); keys = list(self.documents)
-        index = keys.index(key); self.documents.pop(key, None); self.document_paths.pop(key, None); self.validation.pop(key, None)
+        index = keys.index(key); self.documents.pop(key, None); closed_path = self.document_paths.pop(key, Path(key)); self.validation.pop(key, None)
         self.document_generations.pop(key, None)
+        release_document(closed_path)
         self.preflight_reports = {entry: report for entry, report in self.preflight_reports.items() if entry[0] != key}
         if self.documents:
             remaining = list(self.documents)
@@ -808,13 +828,17 @@ class MainWindow(QMainWindow):
         else:
             self.token += 1; self.render_serial += 1; self.path = None; self.info = None; self.page = 0
             self.preview.set_image_highlight()
+            self._final_pixmap = None; self._render_limited = False
             self.preview.clear(); self.preview.hide(); self.drop.show(); self._document_state(None)
             self._refresh_document_combo(); self._update_document_controls()
 
     def clear_all(self):
+        self._zoom_timer.stop(); self._render_pending = False
         self.token += 1; self.render_serial += 1
         self.preview.set_image_highlight()
+        for path in tuple(self.document_paths.values()): release_document(path)
         self.documents.clear(); self.document_paths.clear(); self.document_generations.clear(); self.validation.clear(); self.preflight_reports.clear(); self.path = None; self.info = None; self.page = 0
+        self._final_pixmap = None
         self.preview.clear(); self.preview.hide(); self.drop.show(); self._document_state(None)
         self._refresh_document_combo(); self._update_document_controls()
 
@@ -851,15 +875,18 @@ class MainWindow(QMainWindow):
             self.validation[key] = "checking"
             self._validation_display("checking")
 
-    def _start_task(self, task):
+    def _start_task(self, task, priority=0):
         # Keep the Python QRunnable wrapper alive until its queued signals have
         # reached the GUI thread. This matters for short-lived inspect tasks.
         self._tasks.add(task)
         task.signals.finished.connect(lambda _token, current=task: self._tasks.discard(current))
-        self.pool.start(task)
+        self.pool.start(task, priority)
 
     def _validation_display(self, status):
         if not self.info: return
+        if self._render_limited:
+            self.details["render"].setText(f"{self.t['render']}: {self.t.get('render_limited', 'Resolution limited')}")
+            return
         self.details["render"].setText(f"{self.t['render']}: {self.t[status]}")
 
     def _validation_done_for(self, key, token):
@@ -1134,22 +1161,58 @@ class MainWindow(QMainWindow):
         return max(0.05, min(8.0, min(width, height) if mode == "page" else width))
 
     def set_view(self, key):
-        if key == "zoom_in": self.fit_mode = "manual"; self.zoom = min(8.0, self.zoom * 1.2)
-        elif key == "zoom_out": self.fit_mode = "manual"; self.zoom = max(0.05, self.zoom / 1.2)
+        if key in ("zoom_in", "zoom_out"):
+            current = self.zoom if self.fit_mode == "manual" else self._fit_zoom()
+            target = current * 1.2 if key == "zoom_in" else current / 1.2
+            self._set_zoom_factor(max(0.05, min(8.0, target)), debounced=True); return
         elif key == "fit_width": self.fit_mode = "width"
         else: self.fit_mode = "page"
+        self._zoom_timer.stop()
         self._render()
 
-    def _set_zoom_factor(self, zoom):
+    def _set_zoom_factor(self, zoom, debounced=True):
+        old = self.zoom if self.fit_mode == "manual" else self._fit_zoom()
+        center = self.scroll.viewport().rect().center()
+        anchor_x = self.scroll.horizontalScrollBar().value() + center.x()
+        anchor_y = self.scroll.verticalScrollBar().value() + center.y()
         self.fit_mode = "manual"
         self.zoom = max(0.05, min(8.0, float(zoom)))
-        self._pending_zoom_anchor = None
         self.zoom_control.set_zoom(self.zoom)
-        self._render()
+        self._scale_preview_immediately(old, self.zoom, anchor_x, anchor_y, center.x(), center.y())
+        self._schedule_zoom_render(debounced)
+
+    def _schedule_zoom_render(self, debounced=True):
+        if debounced:
+            self._zoom_timer.start(self._debounce_ms)
+        else:
+            self._zoom_timer.stop(); self._render()
+
+    def _scale_preview_immediately(self, old_zoom, new_zoom, anchor_x, anchor_y, x, y):
+        """Scale the last final PDFium pixmap for instant interaction feedback."""
+        if self._final_pixmap is None or old_zoom <= 0:
+            return
+        dpr = max(1.0, self.devicePixelRatioF())
+        factor = new_zoom / self._final_zoom
+        base = self._final_pixmap
+        requested_width = max(1, round(base.width() * factor)); requested_height = max(1, round(base.height() * factor))
+        cap_ratio = min(1.0, (MAX_RENDER_PIXELS / (requested_width * requested_height)) ** 0.5,
+                        MAX_RENDER_DIMENSION / requested_width, MAX_RENDER_DIMENSION / requested_height)
+        width = max(1, round(requested_width * cap_ratio)); height = max(1, round(requested_height * cap_ratio))
+        # Temporary Qt scaling is intentionally fast; a final PDFium render replaces it.
+        preview = base.scaled(width, height, Qt.AspectRatioMode.IgnoreAspectRatio,
+                              Qt.TransformationMode.FastTransformation)
+        preview.setDevicePixelRatio(max(0.05, base.devicePixelRatioF() * cap_ratio))
+        self.preview.setPixmap(preview)
+        self.preview.resize(QSize(max(1, round(requested_width / dpr)),
+                                  max(1, round(requested_height / dpr))))
+        self.scroll.horizontalScrollBar().setValue(max(0, round(anchor_x * new_zoom / old_zoom - x)))
+        self.scroll.verticalScrollBar().setValue(max(0, round(anchor_y * new_zoom / old_zoom - y)))
+        self.zoom_control.set_zoom(new_zoom)
+        self.preview.setToolTip(self.t.get("preview_temporary", ""))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self.info and self.fit_mode in ("page", "width"): self._render()
+        if self.info and self.fit_mode in ("page", "width"): self._schedule_zoom_render(True)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1164,7 +1227,7 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched, event):
         if watched is self.scroll.viewport() and event.type() == QEvent.Type.Resize:
-            if self.info and self.fit_mode in ("page", "width"): self._render()
+            if self.info and self.fit_mode in ("page", "width"): self._schedule_zoom_render(True)
         return super().eventFilter(watched, event)
 
     def _pan(self, dx, dy):
@@ -1179,10 +1242,13 @@ class MainWindow(QMainWindow):
         if abs(new - old) < 1e-7: return
         bar_x, bar_y = self.scroll.horizontalScrollBar(), self.scroll.verticalScrollBar()
         anchor_x = bar_x.value() + x; anchor_y = bar_y.value() + y
-        self.fit_mode = "manual"; self.zoom = new; self._render()
-        self._pending_zoom_anchor = (int(anchor_x), int(anchor_y), x, y, new / old)
+        self.fit_mode = "manual"; self.zoom = new
+        self.zoom_control.set_zoom(new)
+        self._scale_preview_immediately(old, new, anchor_x, anchor_y, x, y)
+        self._schedule_zoom_render(True)
 
     def _render(self):
+        self._zoom_timer.stop()
         if not self.info:
             self._update_page_label(); return
         page = self.info.pages[self.page]
@@ -1192,21 +1258,36 @@ class MainWindow(QMainWindow):
         pixel_scale = 96.0 / 72.0 * zoom * dpr
         self.render_serial += 1
         token, serial, index, path = self.token, self.render_serial, self.page, self.info.path
-        task = Task(token, lambda: (serial, index, dpr, render_page(path, index, pixel_scale)))
-        task.signals.result.connect(self._image_ready); task.signals.failed.connect(self._render_failed); self._start_task(task)
+        self._render_requests += 1
+        if self._render_busy:
+            self._render_pending = True
+            self._update_page_label(); return
+        self._render_busy = True; self._render_active_serial = serial
+        self._pdfium_render_started += 1
+        task = Task(token, lambda: (serial, index, dpr, zoom, render_page_result(path, index, pixel_scale)))
+        task.signals.result.connect(self._image_ready); task.signals.failed.connect(self._render_failed)
+        task.signals.finished.connect(self._render_finished); self._start_task(task, priority=10)
         self._update_page_label()
 
     def _image_ready(self, token, result):
         if token != self.token: return
-        serial, index, dpr, image = result
+        serial, index, dpr, zoom, rendered = result
         if serial != self.render_serial or index != self.page: return
+        image = rendered.image
         pixmap = QPixmap.fromImage(image); pixmap.setDevicePixelRatio(dpr)
+        self._final_pixmap = pixmap; self._final_zoom = zoom
         self.preview.setPixmap(pixmap); self.preview.resize(pixmap.deviceIndependentSize().toSize())
-        if self._pending_zoom_anchor:
-            ax, ay, x, y, factor = self._pending_zoom_anchor
-            self._pending_zoom_anchor = None
-            self.scroll.horizontalScrollBar().setValue(int(ax * factor - x))
-            self.scroll.verticalScrollBar().setValue(int(ay * factor - y))
+        self._render_limited = rendered.limited
+        self.preview.setToolTip(self.t.get("render_limited", "") if rendered.limited else "")
+        self._render_completed += 1
+        if rendered.limited:
+            self.details["render"].setText(f"{self.t['render']}: {self.t.get('render_limited', 'Resolution limited')}")
+
+    def _render_finished(self, _token):
+        self._render_busy = False; self._render_active_serial = None
+        if self._render_pending and self.info and not self._zoom_timer.isActive():
+            self._render_pending = False
+            self._render()
 
     def _render_failed(self, token, _reason):
         if token == self.token: self.details["render"].setText(f"{self.t['render']}: {self.t['error']}")
@@ -1240,10 +1321,17 @@ class MainWindow(QMainWindow):
         self.file_menu.setMinimumWidth(max(self.file_menu.sizeHint().width(), required))
 
     def about(self):
-        details = f"{self.t['about_text']}\n\nVersion: {__version__}\nBuild commit: {build_commit()}"
-        QMessageBox.about(self, f"{self.t['about']} v{__version__}", details)
+        logo = Path(__file__).resolve().parents[3] / "assets" / "logo" / "ppview.ico"
+        dialog = AboutDialog(self, self.language, build_commit(), logo)
+        dialog.exec()
+
+    def user_guide(self):
+        UserGuideDialog(self, self.language).exec()
 
     def closeEvent(self, event):
+        self._zoom_timer.stop(); self._render_pending = False
+        self.token += 1; self.render_serial += 1
+        for path in tuple(self.document_paths.values()): release_document(path)
         app = QApplication.instance()
         if app and hasattr(self, "_drop_filter"):
             app.removeEventFilter(self._drop_filter)

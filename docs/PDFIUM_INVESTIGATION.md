@@ -39,3 +39,7 @@ Repeat the native capture with `./scripts/pdfium_native_trace.ps1` when CDB is a
 ## Limits
 
 The fault was captured on the Trend Micro protected development machine, not on an unprotected machine. CDB stopped at the first-chance exception to capture the stack; allowing normal execution outside the debugger continues to exit successfully. The evidence locates the immediate faulting path in third-party injected code, but does not identify its internal source line (vendor symbols are unavailable) or rule out a compatibility defect between that hook and GDI+ startup. No software-specific exception handler or security exclusion was added.
+
+## v0.2.3 monitoring rerun (2026-10-15)
+
+The full diagnostic matrix was rerun locally for v0.2.3. Python-only, PDFium-only, PDFium plus Qt, fresh-process imports, pytest with default/disabled/explicit faulthandler, and 50 repeated PDFium renders all exited successfully; this run did not print the fatal exception. This does not invalidate the earlier CDB capture or establish that the Trend Micro interaction is fixed, since endpoint-security state can vary. The CI Windows workflow continues to run the same diagnostics, with no suppression or PDFium initialization change.

@@ -44,11 +44,15 @@ if ($LASTEXITCODE -ne 0) { throw 'PDFium smoke test failed.' }
 $env:QT_QPA_PLATFORM = 'offscreen'
 & .\.venv\Scripts\python.exe scripts\ui_smoke.py
 if ($LASTEXITCODE -ne 0) { throw 'Qt UI rendering smoke test failed.' }
+& .\.venv\Scripts\python.exe scripts\help_screenshot_smoke.py
+if ($LASTEXITCODE -ne 0) { throw 'Localized help dialog screenshot smoke test failed.' }
+& .\.venv\Scripts\python.exe scripts\zoom_benchmark.py --output dist\zoom-benchmark.json
+if ($LASTEXITCODE -ne 0) { throw 'Zoom performance benchmark failed.' }
 Remove-Item Env:QT_QPA_PLATFORM
 & .\.venv\Scripts\python.exe scripts\write_build_info.py ppview-build.json
 if ($LASTEXITCODE -ne 0) { throw 'Could not write build metadata.' }
 $appVersion = (Get-Content ppview-build.json -Raw | ConvertFrom-Json).version
-& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets\logo\ppview.ico --version-file build\version_info.txt --paths src --additional-hooks-dir scripts\pyinstaller_hooks --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "ppview-build.json;." src\ppview\main.py
+& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets\logo\ppview.ico --version-file build\version_info.txt --paths src --additional-hooks-dir scripts\pyinstaller_hooks --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "assets/logo/ppview.ico;assets/logo" --add-data "ppview-build.json;." src\ppview\main.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 Remove-Item -LiteralPath ppview-build.json -Force
 & .\.venv\Scripts\python.exe scripts\copy_notices.py dist\PPView

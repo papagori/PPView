@@ -175,7 +175,8 @@ def main():
         raise RuntimeError(f"Packaged EXE metadata does not match source: {build_info}")
     for required in ("_internal/pypdfium2_raw/pdfium.dll", "_internal/PySide6/Qt6Core.dll",
                      "_internal/PySide6/Qt6Gui.dll", "_internal/PySide6/Qt6Widgets.dll",
-                     "_internal/pikepdf/_core.cp311-win_amd64.pyd"):
+                     "_internal/pikepdf/_core.cp311-win_amd64.pyd",
+                     "_internal/assets/logo/ppview.ico", "_internal/assets/logo/ppview-icon.svg"):
         if not (package / required).is_file():
             raise FileNotFoundError(package / required)
     if not list((package / "_internal").rglob("qpdf30*.dll")):
@@ -183,7 +184,8 @@ def main():
     archive = root / "dist" / f"PPView-Portable-v{__version__}-x64.zip"
     required_zip = {"PPView/PPView.exe", "PPView/_internal/pypdfium2_raw/pdfium.dll",
                     "PPView/_internal/PySide6/Qt6Core.dll", "PPView/_internal/PySide6/Qt6Gui.dll",
-                    "PPView/_internal/PySide6/Qt6Widgets.dll", "PPView/_internal/ppview-build.json"}
+                    "PPView/_internal/PySide6/Qt6Widgets.dll", "PPView/_internal/ppview-build.json",
+                    "PPView/_internal/assets/logo/ppview.ico", "PPView/_internal/assets/logo/ppview-icon.svg"}
     with zipfile.ZipFile(archive) as bundle:
         archive_names = set(bundle.namelist())
         missing = required_zip - archive_names

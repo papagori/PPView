@@ -46,6 +46,7 @@ def test_fit_page_and_width_are_bounded_and_use_viewport(window, pdf_file):
 
 def test_zoom_limits(window):
     window.zoom = 7.9
+    window.fit_mode = "manual"
     window.set_view("zoom_in")
     assert window.zoom == 8
     window.zoom = 0.051
@@ -262,6 +263,15 @@ def test_zoom_control_manual_entry_slider_and_clamping(window):
     assert requested[-1] == pytest.approx(1.1)
 
 
+def test_toolbar_zoom_in_starts_from_current_fit_value(window, monkeypatch):
+    monkeypatch.setattr(window, "_fit_zoom", lambda mode=None: 2.0)
+    monkeypatch.setattr(window._zoom_timer, "start", lambda interval=None: None)
+    window.fit_mode = "page"; window.zoom = 1.0
+    window.set_view("zoom_in")
+    assert window.zoom == pytest.approx(2.4)
+    assert window.fit_mode == "manual"
+
+
 def test_language_switching_translates_and_persists(window):
     window.lang_combo.setCurrentIndex(2)
     assert window.language == "fr"
@@ -297,7 +307,7 @@ def test_browser_labels_native_shortcut_and_menus_all_languages(window):
         label = metrics.horizontalAdvance(window.open_action.text())
         shortcut = metrics.horizontalAdvance(window.open_action.shortcut().toString())
         assert window.file_menu.sizeHint().width() >= label + shortcut + 40
-    window.show(); QApplication.processEvents()
+    window.show(); window.preview.show(); QApplication.processEvents()
     assert window.file_menu_button.menu() is window.file_menu
     window.file_menu.popup(window.file_menu_button.mapToGlobal(window.file_menu_button.rect().bottomLeft())); QApplication.processEvents()
     assert window.file_menu.isVisible()
@@ -399,14 +409,126 @@ def test_toolbar_groups_language_is_last_and_branding_present(window):
 
 def test_application_version_and_about_diagnostics_are_dynamic(window, monkeypatch):
     from ppview import __version__
-    from PySide6.QtWidgets import QMessageBox
-    captured = []
-    monkeypatch.setattr(QMessageBox, "about", lambda *args: captured.append(args))
+    from ppview.ui.help_dialogs import AboutDialog
+    from ppview.build_info import build_commit
+    opened = []
+    monkeypatch.setattr(AboutDialog, "exec", lambda dialog: opened.append(dialog) or 0)
     window.about()
     assert window.version_label.text() == f"PPView v{__version__}"
-    assert captured[0][1].endswith(f"v{__version__}")
-    assert f"Version: {__version__}" in captured[0][2]
-    assert "Build commit:" in captured[0][2]
+    dialog = opened[0]
+    labels = [item.text() for item in dialog.findChildren(__import__("PySide6.QtWidgets", fromlist=["QLabel"]).QLabel)]
+    assert any(f"Version: {__version__}" in label for label in labels)
+    assert any("Build commit:" in label for label in labels)
+    assert any("independent of Adobe" in label for label in labels)
+    dialog.close()
+
+
+def test_zoom_immediate_feedback_and_debounce_coalesces_latest_request(window, pdf_file, monkeypatch):
+    from PySide6.QtGui import QPixmap
+    window.info = inspect_file(pdf_file); window.path = pdf_file.resolve()
+    window._final_pixmap = QPixmap(800, 1000); window._final_zoom = 1.0
+    starts = []
+    monkeypatch.setattr(window._zoom_timer, "start", lambda interval=None: starts.append(interval))
+    window._set_zoom_factor(1.5)
+    window._set_zoom_factor(2.0)
+    assert window.zoom == 2.0
+    assert window.zoom_control.edit.text() == "200%"
+    assert window.preview.pixmap().width() == 1600
+    assert starts == [150, 150]
+    assert window._zoom_timer.interval() == 150
+
+
+def test_zoom_anchor_is_preserved_for_scaled_preview(window, pdf_file):
+    from PySide6.QtGui import QPixmap
+    window.info = inspect_file(pdf_file); window.path = pdf_file.resolve()
+    window.show(); window.preview.show(); QApplication.processEvents()
+    window._final_pixmap = QPixmap(800, 1000); window._final_zoom = 1.0
+    window._scale_preview_immediately(1.0, 2.0, 500, 400, 120, 80)
+    assert window.preview.pixmap().width() == 1600
+    assert window.scroll.horizontalScrollBar().maximum() > 0
+    assert window.scroll.verticalScrollBar().maximum() > 0
+    assert window.scroll.horizontalScrollBar().value() == min(880, window.scroll.horizontalScrollBar().maximum())
+    assert window.scroll.verticalScrollBar().value() == min(720, window.scroll.verticalScrollBar().maximum())
+
+
+def test_temporary_preview_bitmap_is_bounded_at_extreme_zoom(window):
+    from PySide6.QtGui import QPixmap
+    from ppview.core.document import MAX_RENDER_PIXELS
+    window.show(); window.preview.show(); QApplication.processEvents()
+    window._final_pixmap = QPixmap(800, 1000); window._final_zoom = 1.0
+    window._scale_preview_immediately(1.0, 8.0, 0, 0, 0, 0)
+    pixmap = window.preview.pixmap()
+    assert pixmap.width() * pixmap.height() <= MAX_RENDER_PIXELS + 20_000
+    assert window.preview.width() >= pixmap.width()
+
+
+def test_limited_pdfium_render_is_never_shown_as_passed(window):
+    from PySide6.QtGui import QImage
+    from ppview.core.document import RenderResult
+    info = type("Info", (), {"path": Path("bounded.pdf"), "pages": (object(),)})()
+    window.info = info; window.path = info.path; window.page = 0
+    window.token = 4; window.render_serial = 9
+    limited = RenderResult(QImage(40, 40, QImage.Format.Format_RGB888), 4.0, 1.0, True)
+    window._image_ready(4, (9, 0, 1.0, 4.0, limited))
+    window._validation_display("passed")
+    assert window.t["render_limited"] in window.details["render"].text()
+    assert window.t["render_limited"] in window.preview.toolTip()
+
+
+def test_zoom_pending_result_waits_for_debounce_and_document_switch_cancels_timer(window, pdf_file, tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(window, "_render", lambda: calls.append(window.path))
+    first_info = inspect_file(pdf_file)
+    second = tmp_path / "second.pdf"; second.write_bytes(make_pdf(2)); second_info = inspect_file(second)
+    first_key, second_key = window._canonical(pdf_file), window._canonical(second)
+    window.documents.update({first_key: first_info, second_key: second_info})
+    window.document_paths.update({first_key: pdf_file.resolve(), second_key: second.resolve()})
+    window._validate_selected = lambda: None
+    window._select_path(first_key)
+    calls.clear(); window._render_busy = True; window._render_pending = True
+    window._zoom_timer.start(1000)
+    window._render_finished(window.token)
+    assert calls == []  # pending latest state remains behind the active debounce
+    window._select_path(second_key)
+    assert not window._zoom_timer.isActive()
+    assert window.path == second.resolve()
+    assert calls == [second.resolve()]
+
+
+def test_closing_document_while_rendering_cannot_restart_stale_work(window):
+    calls = []
+    window._render_pending = True; window._render_busy = True
+    window.clear_all()
+    window._render = lambda: calls.append(True)
+    window._render_finished(window.token)
+    assert calls == []
+    assert window.info is None
+
+
+def test_help_menu_and_about_guide_translate_all_languages(window):
+    from ppview.ui.help_dialogs import GUIDE, AboutDialog, UserGuideDialog, URLS
+    from ppview.i18n.strings import strings
+    from PySide6.QtWidgets import QLabel, QDialogButtonBox
+    from ppview.build_info import build_commit
+    from ppview import __version__
+    assert set(GUIDE) == {"en", "ja", "fr"}
+    expected = {"en": "Opening documents", "ja": "ドキュメントを開く", "fr": "Ouvrir des documents"}
+    for language in ("en", "ja", "fr"):
+        window.language = language; window.t = strings(language); window._translate()
+        assert window.guide_action.text() == window.t["guide"]
+        guide = UserGuideDialog(window, language)
+        content = " ".join(label.text() for label in guide.findChildren(QLabel))
+        assert expected[language] in content
+        close_text = {"en": "Close", "ja": "閉じる", "fr": "Fermer"}[language]
+        assert guide.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Close).text() == close_text
+        about = AboutDialog(window, language, build_commit(), Path("assets/logo/ppview.ico"))
+        about_content = " ".join(label.text() for label in about.findChildren(QLabel))
+        assert f"{__version__}" in about_content and "Matthieu Tuffet" in about_content
+        assert "Adobe" in about_content
+        for _label, url in URLS:
+            assert url in about_content
+        about.close()
+        guide.close()
 
 
 def test_all_languages_have_complete_translation_keys():

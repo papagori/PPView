@@ -1,4 +1,5 @@
-from ppview.core.document import DocumentError, inspect_file, render_page, validate_rendering
+from ppview.core import document
+from ppview.core.document import DocumentError, inspect_file, render_page, render_page_result, validate_rendering
 from conftest import make_pdf
 import pytest
 
@@ -39,3 +40,21 @@ def test_pdf_content_detected_regardless_of_pdf_extension(tmp_path):
 
 def test_bad_page_index_is_handled(pdf_file):
     with pytest.raises(DocumentError): render_page(pdf_file, 99, 1)
+
+
+def test_document_byte_cache_reuses_snapshot_and_invalidates_changed_file(pdf_file, monkeypatch):
+    first = document._read_cached(pdf_file)
+    assert document._read_cached(pdf_file) is first
+    pdf_file.write_bytes(make_pdf(2))
+    second = document._read_cached(pdf_file)
+    assert second != first
+    document.release_document(pdf_file)
+    assert str(pdf_file.resolve()).casefold() not in document._BYTE_CACHE
+
+
+def test_render_result_reports_safe_resolution_fallback(pdf_file, monkeypatch):
+    monkeypatch.setattr(document, "MAX_RENDER_PIXELS", 100_000)
+    result = render_page_result(pdf_file, 0, 4.0)
+    assert result.limited
+    assert result.actual_scale < result.requested_scale
+    assert result.image.width() * result.image.height() <= document.MAX_RENDER_PIXELS * 1.01

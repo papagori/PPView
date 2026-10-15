@@ -1,6 +1,6 @@
 # PPView
 
-PPView 0.2.2 is an independent local desktop viewer for PDFs and Adobe Illustrator `.ai` files that contain PDF-compatible content. It requires no Adobe application, service, account, or scripting API. It renders pages with PDFium and reports a focused set of technical preflight observations. PPView does not edit or repair source files and is not a certified print-production validator.
+PPView 0.2.3 is an independent local desktop viewer for PDFs and Adobe Illustrator `.ai` files that contain PDF-compatible content. It requires no Adobe application, service, account, or scripting API. It renders pages with PDFium and reports a focused set of technical preflight observations. PPView does not edit or repair source files and is not a certified print-production validator.
 
 **Source documents are never modified.** Files stay on the local computer; PPView has no account, telemetry, cloud processing, or upload feature.
 
@@ -23,6 +23,10 @@ Successful opening or previewing does not guarantee print readiness. Complex tra
 
 Open files with drag-and-drop, **File > Open Files** / **Ctrl+O**, or the integrated Browser. The Information / Checks panel displays document information and findings. Use the toolbar to fit, zoom, pan, and navigate pages; multiple documents can remain open. English, Japanese, and French switch immediately and the selected language is saved.
 
+## Offline help and zoom behavior
+
+The Help menu contains a translated User Guide and About PPView dialog in English, Japanese, and French. The guide explains document opening, preview controls, preflight statuses, and limits without an Internet connection. During zoom, PPView immediately scales the last PDFium image for interaction; after a 150 ms pause it renders the selected page again with PDFium. The temporary image can look soft until the final render completes. A 96 MiB source-byte cache is shared by path and file timestamp and is released when the document closes. PDFium bitmaps are limited to 16 million pixels and 16,384 pixels per side; a reduced-resolution result is explicitly identified. PDFium documents are still opened and closed per render to avoid sharing native objects across threads.
+
 ## Screenshots and branding
 
 The main window and icon assets are in [`assets/logo`](assets/logo). The Windows build embeds the multi-size ICO and uses the SVG mark in the app window. Test screenshots are generated from local PDFs; they do not represent tests of genuine Illustrator files.
@@ -44,15 +48,17 @@ python -m ppview.main
 python -m pytest
 ```
 
+Run `python scripts/zoom_benchmark.py --output dist/zoom-benchmark.json` for repeatable synthetic small and complex PDF measurements comparing the v0.2.2 rendering path with the cached v0.2.3 path. It reports median render/open timings, zoom handler response, actual render count, and Windows working set. It does not represent performance on the user’s 29 MB Illustrator brochure.
+
 The generated fixtures cover image scaling and rotation, form placements, font resources, page boxes, and common color spaces. They are synthetic PDFs and do not claim full Adobe Illustrator compatibility.
 
 ## Install or use the portable Windows build
 
-For a per-user installation on Windows 10 or 11 x64, run `PPView-Setup-v0.2.2-x64.exe`. Choose an installation folder, select an installer language (English, Japanese, or French), and optionally enable the desktop shortcut. The installer creates a Start Menu shortcut and a standard Windows uninstall entry. It does not change `.ai` or `.pdf` file associations. Uninstall from **Settings > Apps > Installed apps** or the Start Menu; PPView preferences remain in the user profile.
+For a per-user installation on Windows 10 or 11 x64, run `PPView-Setup-v0.2.3-x64.exe`. Choose an installation folder, select an installer language (English, Japanese, or French), and optionally enable the desktop shortcut. The installer creates a Start Menu shortcut and a standard Windows uninstall entry. It does not change `.ai` or `.pdf` file associations. Uninstall from **Settings > Apps > Installed apps** or the Start Menu; PPView preferences remain in the user profile.
 
 The installer is unsigned. Windows SmartScreen may warn that the software is unfamiliar. Verify the SHA-256 checksum file distributed beside the installer before running it.
 
-The portable package is `PPView-Portable-v0.2.2-x64.zip`. Extract the folder anywhere writable and run `PPView/PPView.exe`; no installation or Python runtime is required. Preferences continue to be stored in the current Windows user profile.
+The portable package is `PPView-Portable-v0.2.3-x64.zip`. Extract the folder anywhere writable and run `PPView/PPView.exe`; no installation or Python runtime is required. Preferences continue to be stored in the current Windows user profile.
 
 For the genuine Illustrator document checklist, see [Real AI validation](docs/REAL_AI_VALIDATION.md).
 
@@ -69,6 +75,9 @@ The script recreates the project `.venv`, runs tests and smoke checks, builds th
 ## PDFium diagnostic
 
 Run `python scripts/pdfium_diagnostics.py` to repeat the isolated import, pytest, faulthandler, and rendering comparisons. Current local evidence and limits are recorded in [PDFium investigation](docs/PDFIUM_INVESTIGATION.md). The exception remains under investigation and must be rechecked on a clean Windows machine before a public beta.
+
+
+See [Zoom performance](docs/ZOOM_PERFORMANCE.md) for implementation decisions and reproducible synthetic measurements.
 
 ## License and dependencies
 
