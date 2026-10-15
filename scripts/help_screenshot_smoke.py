@@ -4,7 +4,7 @@ from pathlib import Path
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
-from ppview import __version__
+from ppview import __display_version__
 from ppview.build_info import build_commit
 from ppview.ui.help_dialogs import AboutDialog, UserGuideDialog
 
@@ -26,7 +26,7 @@ for language in ("en", "ja", "fr"):
         family = "Meiryo" if language == "ja" and "Meiryo" in families else ("Arial" if "Arial" in families else "Sans Serif")
         dialog.setFont(QFont(family, 10))
         dialog.resize(620, 520); dialog.show(); app.processEvents()
-        path = out / f"PPView-v{__version__}-help-{language}-{kind}.png"
+        path = out / f"PPView-v{__display_version__}-help-{language}-{kind}.png"
         if not dialog.grab().save(str(path), "PNG"):
             raise RuntimeError(f"Could not save {path}")
         print(path)

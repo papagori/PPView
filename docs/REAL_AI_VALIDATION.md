@@ -2,15 +2,17 @@
 
 Use genuine PDF-compatible `.ai` files saved by Adobe Illustrator. Do not rename a `.pdf` file to `.ai`; that only tests extension handling. Keep private files on the local computer. PPView has no upload workflow, and these checks do not require sending documents to anyone.
 
-No genuine Illustrator documents were available during this development run, so this checklist records a repeatable local procedure and does not claim real-file compatibility results.
+The project owner has reported successful use with genuine PDF-compatible Illustrator documents, including a Japanese brochure. That experience is useful real-world feedback but does not establish universal Illustrator compatibility. This checklist supports further local testing; it does not claim that every example below was retested for this beta.
 
 ## Procedure
 
 1. Copy a representative `.ai` file to a local test folder and open it from PPView. Keep the original unchanged.
-2. Repeat with one small file and one large or complex file. Include examples with Japanese and Latin text, placed images, vector artwork, transparency, clipping masks, and multiple artboards where available.
-3. Switch the interface through English, Japanese, and French. Reopen the document after changing languages.
-4. Use the checklist below. Record the PPView version, Windows version, approximate file size, and any observed error. Do not include private artwork in a report unless you choose to share it.
-5. Close and reopen each file, then switch between two open documents while analysis is running. Confirm the displayed findings belong to the selected document.
+2. Try a small Illustrator document and a large photographic Illustrator document.
+3. Try a document containing Japanese text and one combining vector artwork with raster images.
+4. If available, try a multipage PDF and an Illustrator file with multiple artboards. PDF pages and Illustrator artboards need not correspond one-to-one.
+5. Switch the interface through English, Japanese, and French. Reopen the document after changing languages.
+6. Use the checklist below. Record the PPView version, Windows version, approximate file size, and any observed error. Do not include private artwork in a report.
+7. Close and reopen each file, then switch between two open documents while analysis is running. Confirm the displayed findings belong to the selected document.
 
 ## Checklist
 

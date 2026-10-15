@@ -53,7 +53,7 @@ WM_CLOSE = 0x0010
 
 def verify_executable_icon(exe: Path):
     """Verify the packaged PE icon group and every embedded PNG payload."""
-    from ppview import __version__
+    from ppview import __display_version__, __version__, __windows_version_info__
     import struct
     import pefile
 
@@ -72,7 +72,7 @@ def verify_executable_icon(exe: Path):
 
     pe = pefile.PE(str(exe), fast_load=True)
     pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_RESOURCE']])
-    expected_version = tuple(int(value) for value in __version__.split(".")) + (0,)
+    expected_version = __windows_version_info__
     if not pe.VS_FIXEDFILEINFO:
         raise RuntimeError("PPView.exe is missing Windows file-version metadata")
     fixed = pe.VS_FIXEDFILEINFO[0]
@@ -80,6 +80,19 @@ def verify_executable_icon(exe: Path):
                       fixed.FileVersionLS >> 16, fixed.FileVersionLS & 0xFFFF)
     if actual_version != expected_version:
         raise RuntimeError(f"PPView.exe version metadata is {actual_version}, expected {expected_version}")
+    version_strings = {}
+    for info in pe.FileInfo or []:
+        for entry in info:
+            if getattr(entry, "Key", b"") != b"StringFileInfo":
+                continue
+            for table in getattr(entry, "StringTable", []):
+                for key, value in table.entries.items():
+                    key_text = key.decode("utf-8", errors="replace") if isinstance(key, bytes) else str(key)
+                    value_text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
+                    version_strings[key_text] = value_text
+    for field in ("FileVersion", "ProductVersion"):
+        if version_strings.get(field) != __display_version__:
+            raise RuntimeError(f"PPView.exe {field} is {version_strings.get(field)!r}, expected {__display_version__!r}")
     resources = {entry.id: entry for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries}
 
     def resource_data(entry):
@@ -160,7 +173,7 @@ def window_for_pid(pid: int):
 def main():
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root / "src"))
-    from ppview import __version__
+    from ppview import __display_version__, __version__
     exe = root / "dist" / "PPView" / "PPView.exe"
     if not exe.is_file():
         raise FileNotFoundError(exe)
@@ -171,7 +184,9 @@ def main():
     build_info = json.loads(build_info_path.read_text(encoding="utf-8"))
     source_commit = subprocess.run(["git", "-c", f"safe.directory={root.as_posix()}", "rev-parse", "HEAD"], cwd=root, capture_output=True,
                                    text=True, check=True).stdout.strip()
-    if build_info.get("version") != __version__ or build_info.get("commit") != source_commit:
+    if (build_info.get("version") != __version__ or
+            build_info.get("display_version") != __display_version__ or
+            build_info.get("commit") != source_commit):
         raise RuntimeError(f"Packaged EXE metadata does not match source: {build_info}")
     for required in ("_internal/pypdfium2_raw/pdfium.dll", "_internal/PySide6/Qt6Core.dll",
                      "_internal/PySide6/Qt6Gui.dll", "_internal/PySide6/Qt6Widgets.dll",
@@ -181,7 +196,7 @@ def main():
             raise FileNotFoundError(package / required)
     if not list((package / "_internal").rglob("qpdf30*.dll")):
         raise FileNotFoundError("PyInstaller distribution is missing pikepdf's QPDF runtime DLL")
-    archive = root / "dist" / f"PPView-Portable-v{__version__}-x64.zip"
+    archive = root / "dist" / f"PPView-Portable-v{__display_version__}-x64.zip"
     required_zip = {"PPView/PPView.exe", "PPView/_internal/pypdfium2_raw/pdfium.dll",
                     "PPView/_internal/PySide6/Qt6Core.dll", "PPView/_internal/PySide6/Qt6Gui.dll",
                     "PPView/_internal/PySide6/Qt6Widgets.dll", "PPView/_internal/ppview-build.json",
@@ -280,7 +295,7 @@ def main():
                         time.sleep(0.1)
                     if not image_capture.is_file():
                         raise RuntimeError(f"Packaged app did not capture the {language} image highlight")
-                    image_path = root / "dist" / f"PPView-v{__version__}-{language}-image-highlight.png"
+                    image_path = root / "dist" / f"PPView-v{__display_version__}-{language}-image-highlight.png"
                     if not QImage(str(image_capture)).save(str(image_path)):
                         raise RuntimeError(f"Could not save packaged {language} image-highlight screenshot")
                     print(f"Packaged {language} image-highlight screenshot: {image_path}")
@@ -307,14 +322,14 @@ def main():
                         painter = QPainter(screenshot)
                         painter.drawImage(metadata["x"], metadata["y"], menu_image)
                         painter.end()
-                        capture_path = root / "dist" / f"PPView-v{__version__}-fr-menu.png"
+                        capture_path = root / "dist" / f"PPView-v{__display_version__}-fr-menu.png"
                         if not screenshot.save(str(capture_path)):
                             raise RuntimeError("Could not save combined French menu screenshot")
                         print(f"French packaged menu screenshot: {capture_path}")
                         print(f"Packaged preflight: {len(preflight['results'])} checks, "
                               f"{preflight['image_count']} images, {preflight['font_count']} font resources")
                     else:
-                        capture_path = root / "dist" / f"PPView-v{__version__}-{language}.png"
+                        capture_path = root / "dist" / f"PPView-v{__display_version__}-{language}.png"
                         if not QImage(str(window_capture)).save(str(capture_path)):
                             raise RuntimeError(f"Could not save packaged {language} screenshot")
                         print(f"Packaged {language} screenshot: {capture_path}")

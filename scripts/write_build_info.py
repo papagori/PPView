@@ -8,7 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from ppview import __version__  # noqa: E402
+from ppview import __display_version__, __version__, __windows_version_info__  # noqa: E402
 
 
 def main() -> None:
@@ -18,14 +18,15 @@ def main() -> None:
     build_dir.mkdir(parents=True, exist_ok=True)
     commit = subprocess.run(["git", "-c", f"safe.directory={ROOT.as_posix()}", "rev-parse", "HEAD"], cwd=ROOT,
                             capture_output=True, text=True, check=True).stdout.strip()
-    output.write_text(json.dumps({"version": __version__, "commit": commit}, indent=2) + "\n",
+    output.write_text(json.dumps({"version": __version__, "display_version": __display_version__,
+                                  "commit": commit}, indent=2) + "\n",
                       encoding="utf-8")
     (ROOT / "installer" / "version.iss").write_text(
-        f'#define AppVersion "{__version__}"\n', encoding="utf-8")
-    version = tuple(int(part) for part in __version__.split(".")) + (0,)
-    if len(version) != 4 or any(part > 65535 for part in version):
+        f'#define AppVersion "{__display_version__}"\n'
+        f'#define AppNumericVersion "{".".join(map(str, __windows_version_info__))}"\n', encoding="utf-8")
+    if len(__windows_version_info__) != 4 or any(part > 65535 for part in __windows_version_info__):
         raise ValueError(f"Version cannot be represented in Windows metadata: {__version__}")
-    version_tuple = ", ".join(str(part) for part in version)
+    version_tuple = ", ".join(str(part) for part in __windows_version_info__)
     (build_dir / "version_info.txt").write_text(
         "# UTF-8\nVSVersionInfo(\n"
         f"  ffi=FixedFileInfo(filevers=({version_tuple}), prodvers=({version_tuple}), "
@@ -34,16 +35,16 @@ def main() -> None:
         "    StringFileInfo([StringTable('040904B0', [\n"
         "      StringStruct('CompanyName', 'Matthieu Tuffet'),\n"
         "      StringStruct('FileDescription', 'PPView local PDF and AI viewer'),\n"
-        "      StringStruct('FileVersion', '" + __version__ + "'),\n"
+        "      StringStruct('FileVersion', '" + __display_version__ + "'),\n"
         "      StringStruct('InternalName', 'PPView'),\n"
         "      StringStruct('OriginalFilename', 'PPView.exe'),\n"
         "      StringStruct('ProductName', 'PPView'),\n"
-        "      StringStruct('ProductVersion', '" + __version__ + "'),\n"
+        "      StringStruct('ProductVersion', '" + __display_version__ + "'),\n"
         "      StringStruct('LegalCopyright', 'Copyright 2026 Matthieu Tuffet; GPLv3'),\n"
         "    ])]),\n"
         "    VarFileInfo([VarStruct('Translation', [1033, 1200])])\n"
         "  ]\n)\n", encoding="utf-8")
-    print(f"Build metadata: PPView {__version__}, commit {commit}")
+    print(f"Build metadata: PPView {__display_version__} (package {__version__}), commit {commit}")
 
 
 if __name__ == "__main__":

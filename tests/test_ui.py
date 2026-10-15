@@ -408,21 +408,21 @@ def test_toolbar_groups_language_is_last_and_branding_present(window):
     assert window.author_link.isFlat()
     assert window.github_link.isFlat()
     assert window.license_link.isFlat()
-    from ppview import __version__
-    assert window.version_label.text() == f"PPView v{__version__}"
+    from ppview import __display_version__
+    assert window.version_label.text() == f"PPView v{__display_version__}"
 
 
 def test_application_version_and_about_diagnostics_are_dynamic(window, monkeypatch):
-    from ppview import __version__
+    from ppview import __display_version__
     from ppview.ui.help_dialogs import AboutDialog
     from ppview.build_info import build_commit
     opened = []
     monkeypatch.setattr(AboutDialog, "exec", lambda dialog: opened.append(dialog) or 0)
     window.about()
-    assert window.version_label.text() == f"PPView v{__version__}"
+    assert window.version_label.text() == f"PPView v{__display_version__}"
     dialog = opened[0]
     labels = [item.text() for item in dialog.findChildren(__import__("PySide6.QtWidgets", fromlist=["QLabel"]).QLabel)]
-    assert any(f"Version: {__version__}" in label for label in labels)
+    assert any(f"Version: {__display_version__}" in label for label in labels)
     assert any("Build commit:" in label for label in labels)
     assert any("independent of Adobe" in label for label in labels)
     dialog.close()
@@ -515,7 +515,7 @@ def test_help_menu_and_about_guide_translate_all_languages(window):
     from ppview.i18n.strings import strings
     from PySide6.QtWidgets import QLabel, QDialogButtonBox
     from ppview.build_info import build_commit
-    from ppview import __version__
+    from ppview import __display_version__
     assert set(GUIDE) == {"en", "ja", "fr"}
     expected = {"en": "Opening documents", "ja": "ドキュメントを開く", "fr": "Ouvrir des documents"}
     for language in ("en", "ja", "fr"):
@@ -528,7 +528,7 @@ def test_help_menu_and_about_guide_translate_all_languages(window):
         assert guide.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Close).text() == close_text
         about = AboutDialog(window, language, build_commit(), Path("assets/logo/ppview.ico"))
         about_content = " ".join(label.text() for label in about.findChildren(QLabel))
-        assert f"{__version__}" in about_content and "Matthieu Tuffet" in about_content
+        assert f"{__display_version__}" in about_content and "Matthieu Tuffet" in about_content
         assert "Adobe" in about_content
         for _label, url in URLS:
             assert url in about_content

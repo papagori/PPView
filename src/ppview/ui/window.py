@@ -16,7 +16,7 @@ from PySide6.QtSvg import QSvgRenderer
 from ppview.core.document import (DocumentError, DocumentInfo, MAX_RENDER_DIMENSION,
     MAX_RENDER_PIXELS, inspect_file, render_page_result, release_document, validate_rendering)
 from ppview.i18n.strings import initial_language, strings
-from ppview import __version__
+from ppview import __display_version__
 from ppview.build_info import build_commit
 from ppview.validation import CheckResult, PreflightReport, PreflightSettings, Status, run_preflight
 from ppview.ui.help_dialogs import AboutDialog, UserGuideDialog
@@ -607,7 +607,7 @@ class MainWindow(QMainWindow):
         self.zoom_control.setToolTip(t["tip_zoom"]); self.zoom_control.edit.setToolTip(t["tip_zoom"])
         self.zoom_control.popup.setToolTip(t["tip_zoom"])
         self.copyright_prefix.setText(t["copyright"])
-        self.version_label.setText(f"PPView v{__version__}")
+        self.version_label.setText(f"PPView v{__display_version__}")
         self.info_heading.setText(t["document_information"]); self.check_heading.setText(t["preflight_checks"])
         self.file_menu_button.setText(t["file"]); self.file_menu_button.setToolTip(t["file"])
         self.help_menu_button.setText(t["help"]); self.help_menu_button.setToolTip(t["help"])

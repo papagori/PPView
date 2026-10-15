@@ -50,7 +50,7 @@ jobs:
       - name: Set package version
         shell: pwsh
         run: |
-          $version = (Get-Content ppview-build.json -Raw | ConvertFrom-Json).version
+          $version = (Get-Content ppview-build.json -Raw | ConvertFrom-Json).display_version
           "PPVIEW_VERSION=$version" >> $env:GITHUB_ENV
       - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets/logo/ppview.ico --version-file build/version_info.txt --paths src --additional-hooks-dir scripts/pyinstaller_hooks --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "assets/logo/ppview.ico;assets/logo" --add-data "ppview-build.json;." src/ppview/main.py
       - shell: pwsh

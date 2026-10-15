@@ -36,6 +36,10 @@ The exception has not been suppressed, faulthandler remains enabled under pytest
 
 Repeat the native capture with `./scripts/pdfium_native_trace.ps1` when CDB is available. It captures the first-chance exception without enabling faulthandler and writes `build/pdfium-native-trace.log`; that raw log contains local paths and loaded module information, so review it before sharing outside the machine.
 
+## v0.3.0-beta.1 monitoring rerun (2026-10-15)
+
+The local Windows diagnostic matrix was rerun for the beta candidate. Python-only, PDFium-only, Qt-only, Qt plus PDFium, fresh-process imports, pytest with default/disabled/explicit faulthandler, and 50 repeated renders with cleanup all exited successfully. This run emitted no access-violation diagnostic and did not crash. No PDFium initialization change or exception suppression was made. The prior first-chance stack through signed Trend Micro modules remains valid evidence; a clean endpoint-security-free Windows machine was not available for this rerun, so the possible Trend Micro/GDI+ interaction remains unresolved.
+
 ## Limits
 
 The fault was captured on the Trend Micro protected development machine, not on an unprotected machine. CDB stopped at the first-chance exception to capture the stack; allowing normal execution outside the debugger continues to exit successfully. The evidence locates the immediate faulting path in third-party injected code, but does not identify its internal source line (vendor symbols are unavailable) or rule out a compatibility defect between that hook and GDI+ startup. No software-specific exception handler or security exclusion was added.

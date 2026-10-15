@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
-from ppview import __version__
+from ppview import __display_version__
 
 URLS = (
     ("GitHub", "https://github.com/papagori/PPView"),
@@ -55,7 +55,7 @@ class AboutDialog(_BaseDialog):
     def __init__(self, parent, language, commit, logo):
         lang = language if language in ABOUT else "en"
         subtitle, description, author, copyright_text, license_text = ABOUT[lang]
-        super().__init__(parent, f"About PPView — {__version__}" if lang == "en" else (f"PPView について — {__version__}" if lang == "ja" else f"À propos de PPView — {__version__}"))
+        super().__init__(parent, f"About PPView — {__display_version__}" if lang == "en" else (f"PPView について — {__display_version__}" if lang == "ja" else f"À propos de PPView — {__display_version__}"))
         layout = QVBoxLayout(self)
         heading = QHBoxLayout()
         icon = QLabel(); icon.setPixmap(QIcon(str(logo)).pixmap(56, 56)); heading.addWidget(icon)
@@ -63,7 +63,7 @@ class AboutDialog(_BaseDialog):
         heading.addStretch(1); layout.addLayout(heading)
         sub = QLabel(subtitle); sub.setWordWrap(True); sub.setStyleSheet("font-size:15px;font-weight:600"); layout.addWidget(sub)
         body = QLabel(description); body.setWordWrap(True); body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); layout.addWidget(body)
-        for line in (f"Version: {__version__}" if lang == "en" else (f"バージョン: {__version__}" if lang == "ja" else f"Version : {__version__}"), f"Build commit: {commit}", author, copyright_text, license_text):
+        for line in (f"Version: {__display_version__}" if lang == "en" else (f"バージョン: {__display_version__}" if lang == "ja" else f"Version : {__display_version__}"), f"Build commit: {commit}", author, copyright_text, license_text):
             label = QLabel(line); label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); layout.addWidget(label)
         links = QHBoxLayout()
         for label, url in URLS:

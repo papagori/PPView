@@ -29,7 +29,8 @@ def main():
                        if key == active_key]
             if matches:
                 settings, report = matches[-1]
-                payload = {"version": __import__("ppview").__version__,
+                ppview = __import__("ppview")
+                payload = {"version": ppview.__version__, "display_version": ppview.__display_version__,
                            "page_count": report.page_count, "image_count": report.image_count,
                            "image_placement_count": report.image_placement_count,
                            "font_count": report.font_count,

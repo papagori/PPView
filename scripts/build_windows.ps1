@@ -51,7 +51,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Zoom performance benchmark failed.' }
 Remove-Item Env:QT_QPA_PLATFORM
 & .\.venv\Scripts\python.exe scripts\write_build_info.py ppview-build.json
 if ($LASTEXITCODE -ne 0) { throw 'Could not write build metadata.' }
-$appVersion = (Get-Content ppview-build.json -Raw | ConvertFrom-Json).version
+$appVersion = (Get-Content ppview-build.json -Raw | ConvertFrom-Json).display_version
 & .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets\logo\ppview.ico --version-file build\version_info.txt --paths src --additional-hooks-dir scripts\pyinstaller_hooks --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "assets/logo/ppview.ico;assets/logo" --add-data "ppview-build.json;." src\ppview\main.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 Remove-Item -LiteralPath ppview-build.json -Force

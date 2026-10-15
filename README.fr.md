@@ -1,6 +1,6 @@
 # PPView
 
-PPView 0.2.4 est une application de bureau indépendante et locale pour prévisualiser les PDF et les fichiers Adobe Illustrator `.ai` contenant une représentation PDF compatible. Aucun logiciel, service, compte ou API Adobe n’est requis. PDFium rend les pages ; PPView ajoute un ensemble ciblé d’observations techniques de prépresse. L’application ne modifie et ne répare pas les fichiers source. Ce n’est pas un outil certifié de validation de production imprimée.
+PPView 0.3.0-beta.1 est une application de bureau indépendante et locale pour prévisualiser les PDF et les fichiers Adobe Illustrator `.ai` contenant une représentation PDF compatible. Aucun logiciel, service, compte ou API Adobe n’est requis. PDFium rend les pages ; PPView ajoute un ensemble ciblé d’observations techniques de prépresse. L’application ne modifie et ne répare pas les fichiers source. Ce n’est pas un outil certifié de validation de production imprimée.
 
 **Les documents source ne sont jamais modifiés.** Les fichiers restent sur l’ordinateur ; PPView n’utilise ni compte, télémétrie, traitement cloud ou téléversement.
 
@@ -27,6 +27,10 @@ Une ouverture ou un aperçu réussi ne garantit pas la conformité à l’impres
 
 Ouvrez les fichiers par glisser-déposer, via **Fichier > Ouvrir des fichiers** / **Ctrl+O**, ou avec le Navigateur intégré. Le panneau Informations / Contrôles affiche les informations et diagnostics. La barre d’outils permet l’ajustement, le zoom, le déplacement et la navigation ; plusieurs documents peuvent rester ouverts. L’anglais, le japonais et le français sont disponibles immédiatement et la langue choisie est mémorisée.
 
+## Test bêta
+
+Suivez la [liste de test de la bêta externe](docs/BETA_TESTING.fr.md). Signalez les problèmes sur [GitHub Issues](https://github.com/papagori/PPView/issues) en indiquant les versions de PPView et Windows, une description, les étapes, le résultat attendu et réel, et éventuellement une capture. Ne joignez aucun document confidentiel ou propriétaire. Consultez les [notes de version](docs/RELEASE_NOTES_v0.3.0-beta.1.fr.md) pour les changements depuis v0.1.5.
+
 ## Aide hors ligne et zoom
 
 Le menu Aide propose un guide et une fenêtre À propos traduits en anglais, japonais et français. Le guide fonctionne hors ligne. Pendant le zoom, PPView redimensionne immédiatement la dernière image PDFium puis, après une pause de 150 ms, effectue un nouveau rendu PDFium de la page. L’image temporaire peut être moins nette jusqu’au rendu final. Le cache des octets source est limité à 96 Mio et invalidé selon le chemin et l’horodatage ; il est libéré à la fermeture du document. Les bitmaps PDFium sont limités à 16 millions de pixels et 16 384 pixels par côté ; une résolution réduite est signalée. Les documents PDFium restent ouverts et fermés à chaque rendu afin de ne pas partager des objets natifs entre threads.
@@ -49,11 +53,11 @@ Les PDF de test sont générés automatiquement et couvrent notamment l’échel
 
 ## Installation Windows et version portable
 
-Sous Windows 10 ou 11 x64, lancez `PPView-Setup-v0.2.4-x64.exe` pour une installation par utilisateur. Choisissez le dossier, la langue de l’installateur (anglais, japonais ou français) et, si souhaité, le raccourci du bureau. Un raccourci du menu Démarrer et une entrée de désinstallation Windows sont créés. Les associations `.ai` et `.pdf` ne sont pas modifiées. Désinstallez depuis **Paramètres > Applications > Applications installées** ; les préférences du profil utilisateur sont conservées.
+Sous Windows 10 ou 11 x64, lancez `PPView-Setup-v0.3.0-beta.1-x64.exe` pour une installation par utilisateur. Choisissez le dossier, la langue de l’installateur (anglais, japonais ou français) et, si souhaité, le raccourci du bureau. Un raccourci du menu Démarrer et une entrée de désinstallation Windows sont créés. Les associations `.ai` et `.pdf` ne sont pas modifiées. Désinstallez depuis **Paramètres > Applications > Applications installées** ; les préférences du profil utilisateur sont conservées.
 
 L’installateur n’est pas signé. SmartScreen peut signaler un logiciel peu connu. Vérifiez le SHA-256 fourni à côté du programme d’installation.
 
-La version portable est `PPView-Portable-v0.2.4-x64.zip`. Extrayez-la dans un dossier accessible et lancez `PPView/PPView.exe`. Python n’est pas requis ; les préférences restent dans le profil Windows de l’utilisateur.
+La version portable est `PPView-Portable-v0.3.0-beta.1-x64.zip`. Extrayez-la dans un dossier accessible et lancez `PPView/PPView.exe`. Python n’est pas requis ; les préférences restent dans le profil Windows de l’utilisateur.
 
 Consultez la [liste de validation de vrais fichiers Illustrator](docs/REAL_AI_VALIDATION.md).
 

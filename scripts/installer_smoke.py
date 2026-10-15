@@ -31,9 +31,9 @@ def main() -> None:
     if sys.platform != "win32":
         raise SystemExit("Installer smoke test requires Windows.")
     root = Path(__file__).resolve().parents[1]
-    from ppview import __version__
+    from ppview import __display_version__
 
-    setup = root / "dist" / f"PPView-Setup-v{__version__}-x64.exe"
+    setup = root / "dist" / f"PPView-Setup-v{__display_version__}-x64.exe"
     require(setup.is_file(), f"Installer is missing: {setup}")
     settings = QSettings("papagori", "PPView")
     previous_had_language = settings.contains("language")
