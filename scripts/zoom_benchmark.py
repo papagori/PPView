@@ -19,7 +19,7 @@ import pypdfium2 as pdfium
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
-from ppview.core.document import _PDFIUM_LOCK, inspect_file, render_page_result
+from ppview.core.document import _PDFIUM_LOCK, inspect_file, release_document, render_page_result
 from ppview.ui.window import MainWindow
 
 
@@ -75,6 +75,20 @@ def baseline_v022(path: Path, scale: float):
             document.close()
 
 
+def baseline_inspect_v022(path: Path):
+    """Reproduce v0.2.2 inspection's uncached read and PDFium page walk."""
+    data = path.read_bytes()
+    with _PDFIUM_LOCK:
+        document = pdfium.PdfDocument(data)
+        try:
+            for index in range(len(document)):
+                page = document[index]
+                page.get_size()
+                page.close()
+        finally:
+            document.close()
+
+
 def median_ms(fn, repetitions=7):
     values = []
     for _ in range(repetitions):
@@ -113,8 +127,12 @@ def run(output: Path | None):
             # Warm the bounded byte cache before reporting its steady render latency.
             render_page_result(path, 0, scale)
             current = median_ms(lambda: render_page_result(path, 0, scale))
-            baseline_open = median_ms(lambda: (inspect_file(path), baseline_v022(path, scale)))
-            current_open = median_ms(lambda: (inspect_file(path), render_page_result(path, 0, scale)))
+            baseline_open = median_ms(lambda: (baseline_inspect_v022(path), baseline_v022(path, scale)))
+            def current_cold_open():
+                release_document(path)
+                inspect_file(path)
+                render_page_result(path, 0, scale)
+            current_open = median_ms(current_cold_open)
             info = inspect_file(path)
             window = MainWindow(); window.info = info; window.path = path.resolve(); window.preview.show()
             window._debounce_ms = 150; window._zoom_timer.setInterval(150)
@@ -134,20 +152,24 @@ def run(output: Path | None):
             window.clear_all(); window.pool.waitForDone(5000); window.close(); app.processEvents()
             records[label] = {"bytes": path.stat().st_size, "baseline_v0.2.2_render_ms": base,
                               "current_cached_render_ms": current,
-                              "baseline_initial_inspect_plus_render_ms": baseline_open,
-                              "current_initial_inspect_plus_render_ms": current_open,
+                              "baseline_cold_inspect_plus_render_ms": baseline_open,
+                              "current_cold_inspect_plus_render_ms": current_open,
                               "rapid_zoom": zoom_result}
         path = Path(temp) / "large-raster.pdf"; raster_fixture(path)
         base = median_ms(lambda: baseline_v022(path, 0.7), repetitions=5)
         render_page_result(path, 0, 0.7)
         current = median_ms(lambda: render_page_result(path, 0, 0.7), repetitions=5)
-        baseline_open = median_ms(lambda: (inspect_file(path), baseline_v022(path, 0.7)), repetitions=5)
-        current_open = median_ms(lambda: (inspect_file(path), render_page_result(path, 0, 0.7)), repetitions=5)
+        baseline_open = median_ms(lambda: (baseline_inspect_v022(path), baseline_v022(path, 0.7)), repetitions=5)
+        def current_cold_open():
+            release_document(path)
+            inspect_file(path)
+            render_page_result(path, 0, 0.7)
+        current_open = median_ms(current_cold_open, repetitions=5)
         records["large_raster"] = {"bytes": path.stat().st_size,
                                     "baseline_v0.2.2_render_ms": base,
                                     "current_cached_render_ms": current,
-                                    "baseline_initial_inspect_plus_render_ms": baseline_open,
-                                    "current_initial_inspect_plus_render_ms": current_open,
+                                    "baseline_cold_inspect_plus_render_ms": baseline_open,
+                                    "current_cold_inspect_plus_render_ms": current_open,
                                     "render_pixel_limit": 16_000_000}
         memory = working_set_mb()
         report = {"fixture": "synthetic PDF; locally generated; not a genuine Illustrator file",
