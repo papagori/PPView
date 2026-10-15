@@ -388,6 +388,7 @@ def main():
                     time.sleep(0.025)
                 if process.poll() is not None or not splash_marker.exists() or not ready_marker.exists():
                     raise RuntimeError(f"PPView no-document startup did not complete (exit={process.poll()})")
+                ready_seen = time.perf_counter()
                 while time.monotonic() < deadline and process.poll() is None:
                     result = window_for_pid(process.pid)
                     if result and result[1] != "PPView startup":
@@ -407,7 +408,7 @@ def main():
                 QImage(str(window_capture)).save(str(empty_window_out))
                 timings = json.loads(timing_file.read_text(encoding="utf-8"))
                 print(f"No-document packaged startup timings: process_to_splash_ms={round((splash_seen-process_started)*1000,1)}, "
-                      f"splash_to_ready_ms={round((time.perf_counter()-splash_seen)*1000,1)}, internal={timings}")
+                      f"splash_to_ready_ms={round((ready_seen-splash_seen)*1000,1)}, internal={timings}")
                 print(f"No-document screenshots: {empty_splash_out}, {empty_window_out}")
             finally:
                 if process.poll() is None:
