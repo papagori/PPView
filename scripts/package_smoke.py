@@ -191,7 +191,8 @@ def main():
     for required in ("_internal/pypdfium2_raw/pdfium.dll", "_internal/PySide6/Qt6Core.dll",
                      "_internal/PySide6/Qt6Gui.dll", "_internal/PySide6/Qt6Widgets.dll",
                      "_internal/pikepdf/_core.cp311-win_amd64.pyd",
-                     "_internal/assets/logo/ppview.ico", "_internal/assets/logo/ppview-icon.svg"):
+                     "_internal/assets/logo/ppview.ico", "_internal/assets/logo/ppview-icon.svg",
+                     "_internal/assets/logo/ppview-icon-preview.png"):
         if not (package / required).is_file():
             raise FileNotFoundError(package / required)
     if not list((package / "_internal").rglob("qpdf30*.dll")):
@@ -200,7 +201,8 @@ def main():
     required_zip = {"PPView/PPView.exe", "PPView/_internal/pypdfium2_raw/pdfium.dll",
                     "PPView/_internal/PySide6/Qt6Core.dll", "PPView/_internal/PySide6/Qt6Gui.dll",
                     "PPView/_internal/PySide6/Qt6Widgets.dll", "PPView/_internal/ppview-build.json",
-                    "PPView/_internal/assets/logo/ppview.ico", "PPView/_internal/assets/logo/ppview-icon.svg"}
+                    "PPView/_internal/assets/logo/ppview.ico", "PPView/_internal/assets/logo/ppview-icon.svg",
+                    "PPView/_internal/assets/logo/ppview-icon-preview.png"}
     with zipfile.ZipFile(archive) as bundle:
         archive_names = set(bundle.namelist())
         missing = required_zip - archive_names
@@ -239,12 +241,20 @@ def main():
         try:
             for language in ("en", "ja", "fr"):
                 settings.setValue("language", language)
+                splash_capture = Path(folder) / f"{language}-splash.png"
+                splash_marker = Path(folder) / f"{language}-splash-ready"
+                ready_marker = Path(folder) / f"{language}-window-ready"
+                timing_file = Path(folder) / f"{language}-startup-timings.json"
                 window_capture = Path(folder) / f"{language}-window.png"
                 menu_capture = Path(folder) / "french-file-menu.png" if language == "fr" else None
                 preflight_capture = Path(folder) / "packaged-preflight.json" if language == "fr" else None
                 image_capture = Path(folder) / f"{language}-image-highlight.png"
                 env = os.environ.copy()
                 env["PATH"] = str(Path(os.environ["WINDIR"]) / "System32") + os.pathsep + str(Path(os.environ["WINDIR"]))
+                env["PPVIEW_SMOKE_SPLASH_CAPTURE"] = str(splash_capture)
+                env["PPVIEW_SMOKE_SPLASH_READY"] = str(splash_marker)
+                env["PPVIEW_SMOKE_WINDOW_READY"] = str(ready_marker)
+                env["PPVIEW_STARTUP_TIMING_FILE"] = str(timing_file)
                 env["PPVIEW_SMOKE_WINDOW_CAPTURE"] = str(window_capture)
                 env["PPVIEW_SMOKE_IMAGE_CAPTURE"] = str(image_capture)
                 locale_preflight = (preflight_capture if preflight_capture else
@@ -291,6 +301,17 @@ def main():
                         time.sleep(0.1)
                     if not window_capture.is_file():
                         raise RuntimeError(f"Packaged app did not capture {language} UI")
+                    if not splash_capture.is_file() or not splash_marker.is_file() or not ready_marker.is_file():
+                        raise RuntimeError(f"Packaged app did not show and capture the {language} startup splash")
+                    if not timing_file.is_file():
+                        raise RuntimeError(f"Packaged app did not record {language} startup timings")
+                    splash_path = root / "dist" / f"PPView-v{__display_version__}-{language}-splash.png"
+                    if not QImage(str(splash_capture)).save(str(splash_path)):
+                        raise RuntimeError(f"Could not save packaged {language} splash screenshot")
+                    timings = json.loads(timing_file.read_text(encoding="utf-8"))
+                    if timings.get("status") != "ready":
+                        raise RuntimeError(f"Packaged {language} startup timings report failure: {timings}")
+                    print(f"Packaged {language} startup: {timings}; splash screenshot: {splash_path}")
                     while time.monotonic() < capture_deadline and not image_capture.is_file():
                         time.sleep(0.1)
                     if not image_capture.is_file():
@@ -340,6 +361,60 @@ def main():
                         try: process.wait(timeout=10)
                         except subprocess.TimeoutExpired:
                             process.terminate(); process.wait(timeout=5)
+            # Also verify the no-document launch and report process-to-splash separately
+            # from splash-to-window. This is a fresh process (Windows cache is not flushed).
+            settings.setValue("language", "en")
+            splash_capture = Path(folder) / "empty-startup-splash.png"
+            window_capture = Path(folder) / "empty-startup-window.png"
+            splash_marker = Path(folder) / "empty-splash-ready"
+            ready_marker = Path(folder) / "empty-window-ready"
+            timing_file = Path(folder) / "empty-startup-timings.json"
+            env = os.environ.copy()
+            env["PATH"] = str(Path(os.environ["WINDIR"]) / "System32") + os.pathsep + str(Path(os.environ["WINDIR"]))
+            env.update({"PPVIEW_SMOKE_SPLASH_CAPTURE": str(splash_capture),
+                        "PPVIEW_SMOKE_WINDOW_CAPTURE": str(window_capture),
+                        "PPVIEW_SMOKE_SPLASH_READY": str(splash_marker),
+                        "PPVIEW_SMOKE_WINDOW_READY": str(ready_marker),
+                        "PPVIEW_STARTUP_TIMING_FILE": str(timing_file)})
+            process_started = time.perf_counter()
+            process = subprocess.Popen([str(exe)], cwd=exe.parent, env=env)
+            hwnd = None
+            try:
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline and process.poll() is None and not splash_marker.exists():
+                    time.sleep(0.01)
+                splash_seen = time.perf_counter()
+                while time.monotonic() < deadline and process.poll() is None and not ready_marker.exists():
+                    time.sleep(0.025)
+                if process.poll() is not None or not splash_marker.exists() or not ready_marker.exists():
+                    raise RuntimeError(f"PPView no-document startup did not complete (exit={process.poll()})")
+                while time.monotonic() < deadline and process.poll() is None:
+                    result = window_for_pid(process.pid)
+                    if result and result[1] != "PPView startup":
+                        hwnd = result[0]
+                        break
+                    time.sleep(0.05)
+                if not hwnd:
+                    raise RuntimeError("PPView no-document main window was not found")
+                capture_deadline = time.monotonic() + 5
+                while time.monotonic() < capture_deadline and not window_capture.exists():
+                    time.sleep(0.05)
+                if not splash_capture.is_file() or not window_capture.is_file() or not timing_file.is_file():
+                    raise RuntimeError("PPView no-document startup screenshots or timings are missing")
+                empty_splash_out = root / "dist" / f"PPView-v{__display_version__}-en-splash-no-document.png"
+                empty_window_out = root / "dist" / f"PPView-v{__display_version__}-en-no-document.png"
+                QImage(str(splash_capture)).save(str(empty_splash_out))
+                QImage(str(window_capture)).save(str(empty_window_out))
+                timings = json.loads(timing_file.read_text(encoding="utf-8"))
+                print(f"No-document packaged startup timings: process_to_splash_ms={round((splash_seen-process_started)*1000,1)}, "
+                      f"splash_to_ready_ms={round((time.perf_counter()-splash_seen)*1000,1)}, internal={timings}")
+                print(f"No-document screenshots: {empty_splash_out}, {empty_window_out}")
+            finally:
+                if process.poll() is None:
+                    if hwnd: PostMessageW(hwnd, WM_CLOSE, 0, 0)
+                    try: process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.terminate(); process.wait(timeout=5)
             print("Portable ZIP contains PPView.exe, PDFium, Qt, pikepdf, QPDF, and build metadata")
         finally:
             if had_language:
