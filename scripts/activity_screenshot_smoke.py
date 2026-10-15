@@ -1,4 +1,4 @@
-"""Capture localized activity UI while synthetic long-running work is held active."""
+"""Capture localized activity UI while worker operations are deliberately delayed."""
 from __future__ import annotations
 
 import os
@@ -16,7 +16,9 @@ sys.path.insert(0, str(ROOT / "tests"))
 from PySide6.QtGui import QFont, QFontDatabase  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 from ppview import __display_version__  # noqa: E402
+from ppview.ui import window as window_module  # noqa: E402
 from ppview.ui.window import MainWindow  # noqa: E402
+from ppview.validation import PreflightSettings  # noqa: E402
 from conftest import make_pdf  # noqa: E402
 
 
@@ -42,48 +44,67 @@ def main():
         app.setFont(QFont("Segoe UI", 9))
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
+    original_functions = (window_module.inspect_file, window_module.render_page_result,
+                          window_module.run_preflight)
+
+    def delayed(function):
+        def run(*args, **kwargs):
+            time.sleep(1.2)
+            return function(*args, **kwargs)
+        return run
+
     with tempfile.TemporaryDirectory(prefix="ppview-activity-visual-") as folder:
         pdf = Path(folder) / "activity-visual.pdf"
         pdf.write_bytes(make_pdf())
         for language in ("en", "ja", "fr"):
+            window_module.inspect_file = delayed(original_functions[0])
+            window_module.render_page_result = original_functions[1]
+            window_module.run_preflight = original_functions[2]
             window = MainWindow()
-            window.language = language
-            from ppview.i18n.strings import strings
-            window.t = strings(language)
-            window._translate()
-            window.resize(1360, 820)
-            window.open_file(str(pdf))
-            window.show()
-            if not wait_until(app, lambda: window.info is not None and window._render_completed > 0):
-                raise RuntimeError(f"Could not prepare PDF preview for {language} activity capture")
-            if not wait_until(app, lambda: not window._render_busy and not window._zoom_timer.isActive()):
-                raise RuntimeError(f"PDFium render did not settle for {language} activity capture")
-            time.sleep(0.35)
-            app.processEvents()
+            try:
+                window.language = language
+                from ppview.i18n.strings import strings
+                window.t = strings(language)
+                window._translate()
+                window.resize(1360, 820)
+                window.open_file(str(pdf))
+                window.show()
+                if not wait_until(app, lambda: not window.open_activity.widget.isHidden()):
+                    raise RuntimeError(f"Opening indicator did not appear for {language}")
+                opening = output / f"PPView-v{__display_version__}-activity-opening-{language}.png"
+                if not window.grab().save(str(opening)):
+                    raise RuntimeError(f"Could not save opening screenshot: {opening}")
 
-            token = f"visual-{language}"
-            window.open_activity.begin(token, window.t["activity_opening"])
-            window.render_activity.begin(token, window.t["activity_rendering"])
-            window.preflight_activity.begin(token, window.t["activity_analyzing"])
-            # Hold three synthetic tasks for 1.2 seconds to verify delayed visibility.
-            if not wait_until(app, lambda: all(not item.widget.isHidden() for item in
-                    (window.open_activity, window.render_activity, window.preflight_activity)), timeout=2):
-                raise RuntimeError(f"Activity labels did not appear after their delay in {language}")
-            hold_deadline = time.monotonic() + 0.95
-            while time.monotonic() < hold_deadline:
+                if not wait_until(app, lambda: window.info is not None and window._render_completed > 0
+                                  and (window._canonical(window.path), window._preflight_settings)
+                                  in window.preflight_reports, timeout=20):
+                    raise RuntimeError(f"Normal preview/preflight did not complete for {language}")
+
+                # Trigger a second render and settings-specific preflight while
+                # keeping the already visible page preview in place.
+                window_module.render_page_result = delayed(original_functions[1])
+                window_module.run_preflight = delayed(original_functions[2])
+                window._render()
+                target_ppi = 200 if window._preflight_settings.target_image_ppi != 200 else 300
+                window._preflight_settings = PreflightSettings(target_ppi, window._preflight_settings.minimum_bleed_mm)
+                window._validate_selected()
+                if not wait_until(app, lambda: not window.render_activity.widget.isHidden()
+                                  and not window.preflight_activity.widget.isHidden()):
+                    raise RuntimeError(f"Rendering and analysis indicators did not appear for {language}")
+                working = output / f"PPView-v{__display_version__}-activity-render-analysis-{language}.png"
+                if not window.grab().save(str(working)):
+                    raise RuntimeError(f"Could not save render/analysis screenshot: {working}")
+
+                if not wait_until(app, lambda: window.info is not None and not window._render_busy
+                                  and window.preflight_activity.token is None, timeout=20):
+                    raise RuntimeError(f"Delayed worker tasks did not finish for {language}")
+                print(f"Localized delayed-operation screenshots ({language}): {opening}, {working}")
+            finally:
+                window_module.inspect_file, window_module.render_page_result, window_module.run_preflight = original_functions
+                window.clear_all()
+                window.close()
+                window.pool.waitForDone(5000)
                 app.processEvents()
-                time.sleep(0.02)
-            app.processEvents()
-            target = output / f"PPView-v{__display_version__}-activity-{language}.png"
-            if not window.grab().save(str(target)):
-                raise RuntimeError(f"Could not save activity screenshot: {target}")
-            for activity in (window.open_activity, window.render_activity, window.preflight_activity):
-                activity.finish(token)
-            window.clear_all()
-            window.close()
-            window.pool.waitForDone(5000)
-            app.processEvents()
-            print(f"Localized activity screenshot ({language}): {target}")
 
 
 if __name__ == "__main__":
