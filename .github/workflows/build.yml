@@ -58,7 +58,7 @@ jobs:
         run: |
           $version = (Get-Content ppview-build.json -Raw | ConvertFrom-Json).display_version
           "PPVIEW_VERSION=$version" >> $env:GITHUB_ENV
-      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets/logo/ppview.ico --version-file build/version_info.txt --paths src --additional-hooks-dir scripts/pyinstaller_hooks --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "assets/logo/ppview.ico;assets/logo" --add-data "ppview-build.json;." src/ppview/main.py
+      - run: python -m PyInstaller --noconfirm --clean --onedir --windowed --name PPView --icon assets/logo/ppview.ico --version-file build/version_info.txt --paths src --additional-hooks-dir scripts/pyinstaller_hooks --add-data "assets/logo/ppview-icon.svg;assets/logo" --add-data "assets/logo/ppview-icon-preview.png;assets/logo" --add-data "assets/logo/ppview.ico;assets/logo" --add-data "ppview-build.json;." src/ppview/main.py
       - shell: pwsh
         run: Remove-Item ppview-build.json -Force
       - run: python scripts/copy_notices.py dist/PPView
@@ -84,6 +84,8 @@ jobs:
             dist/SHA256SUMS.txt
             dist/PPView-v*-help-*.png
             dist/PPView-v*-activity-*.png
+            dist/PPView-v*-splash*.png
+            dist/PPView-v*-no-document.png
             dist/zoom-benchmark.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
