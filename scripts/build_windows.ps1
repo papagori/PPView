@@ -44,6 +44,8 @@ if ($LASTEXITCODE -ne 0) { throw 'PDFium smoke test failed.' }
 $env:QT_QPA_PLATFORM = 'offscreen'
 & .\.venv\Scripts\python.exe scripts\ui_smoke.py
 if ($LASTEXITCODE -ne 0) { throw 'Qt UI rendering smoke test failed.' }
+& .\.venv\Scripts\python.exe scripts\activity_screenshot_smoke.py
+if ($LASTEXITCODE -ne 0) { throw 'Localized activity indicator screenshot smoke test failed.' }
 & .\.venv\Scripts\python.exe scripts\help_screenshot_smoke.py
 if ($LASTEXITCODE -ne 0) { throw 'Localized help dialog screenshot smoke test failed.' }
 & .\.venv\Scripts\python.exe scripts\zoom_benchmark.py --output dist\zoom-benchmark.json

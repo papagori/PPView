@@ -2,7 +2,7 @@
 import re
 
 # PEP 440 form is the single source used by Python package metadata.
-__version__ = "0.3.0b1"
+__version__ = "0.3.0b2"
 _version_match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:b(\d+))?", __version__)
 if _version_match is None:  # pragma: no cover - protects release packaging
     raise RuntimeError(f"Unsupported PPView release version: {__version__}")

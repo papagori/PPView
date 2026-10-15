@@ -1,10 +1,10 @@
-# PPView 0.3.0-beta.1: tester checklist
+# PPView 0.3.0-beta.2: tester checklist
 
 This beta is for feedback on PPView's local preview and preflight workflow. It reads the PDF-compatible representation in PDFs and `.ai` files; it does not inspect Illustrator's private editable structures, validate native image links, or certify print production.
 
 ## Try these tasks
 
-1. Install `PPView-Setup-v0.3.0-beta.1-x64.exe`, launch from Start, close and reopen PPView. Optionally test the portable ZIP from an extracted folder.
+1. Install `PPView-Setup-v0.3.0-beta.2-x64.exe`, launch from Start, close and reopen PPView. Optionally test the portable ZIP from an extracted folder.
 2. Open a small PDF-compatible Illustrator file and one large photographic file. Use copies if you want to avoid touching originals; PPView does not edit them.
 3. Check a document with Japanese text, and one with both vector artwork and raster images. If available, try a multipage PDF or an Illustrator file with multiple artboards.
 4. Compare visible text, photographs, graphics, and page order with the source application. Report differences you can see; do not assume a preview proves print readiness.
@@ -16,7 +16,7 @@ This beta is for feedback on PPView's local preview and preflight workflow. It r
 
 Use [GitHub Issues](https://github.com/papagori/PPView/issues) and include:
 
-- PPView version (`0.3.0-beta.1`) and Windows version.
+- PPView version (`0.3.0-beta.2`) and Windows version.
 - What you were doing and what happened.
 - Steps to reproduce.
 - Expected result and actual result.

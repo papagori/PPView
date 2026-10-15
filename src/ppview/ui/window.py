@@ -20,6 +20,7 @@ from ppview import __display_version__
 from ppview.build_info import build_commit
 from ppview.validation import CheckResult, PreflightReport, PreflightSettings, Status, run_preflight
 from ppview.ui.help_dialogs import AboutDialog, UserGuideDialog
+from ppview.ui.activity import DelayedActivity
 
 
 class WorkerSignals(QObject):
@@ -516,6 +517,8 @@ class MainWindow(QMainWindow):
         self.preview.zoom_at.connect(self._zoom_at)
         self.preview.fit_page.connect(lambda: self.set_view("fit_page"))
         self.scroll.setWidget(self.preview)
+        self.open_activity = DelayedActivity(self.scroll.viewport(), object_name="openActivity")
+        self.render_activity = DelayedActivity(self.scroll.viewport(), object_name="renderActivity")
         self.preview.hide()
         self.file_model = QFileSystemModel(self)
         self.file_model.setReadOnly(True)
@@ -549,6 +552,8 @@ class MainWindow(QMainWindow):
         for key in ("filename", "type", "size", "pages", "dimensions", "status"):
             label = QLabel(); label.setWordWrap(True); self.details[key] = label; self.panel_layout.addWidget(label)
         self.check_heading = QLabel(); self.check_heading.setObjectName("panelHeading"); self.panel_layout.addWidget(self.check_heading)
+        self.preflight_activity = DelayedActivity(self.panel, object_name="preflightActivity")
+        self.panel_layout.addWidget(self.preflight_activity.widget)
         for key in ("render", "diagnostics"):
             label = QLabel(); label.setWordWrap(True); self.details[key] = label; self.panel_layout.addWidget(label)
         self.check_tree = QTreeWidget(); self.check_tree.setHeaderHidden(True)
@@ -609,6 +614,9 @@ class MainWindow(QMainWindow):
         self.copyright_prefix.setText(t["copyright"])
         self.version_label.setText(f"PPView v{__display_version__}")
         self.info_heading.setText(t["document_information"]); self.check_heading.setText(t["preflight_checks"])
+        self.open_activity.set_message(t["activity_opening"])
+        self.render_activity.set_message(t["activity_rendering"])
+        self.preflight_activity.set_message(t["activity_analyzing"])
         self.file_menu_button.setText(t["file"]); self.file_menu_button.setToolTip(t["file"])
         self.help_menu_button.setText(t["help"]); self.help_menu_button.setToolTip(t["help"])
         self.file_menu.setTitle(t["file"]); self.open_action.setText(t["open"])
@@ -752,6 +760,7 @@ class MainWindow(QMainWindow):
     def _select_path(self, key):
         self._zoom_timer.stop(); self._render_pending = False
         self.token += 1; self.render_serial += 1
+        self.render_activity.cancel(); self.preflight_activity.cancel()
         self._highlight_page = None
         self.preview.set_image_highlight()
         self.path = self.document_paths.get(key, Path(key)); self.info = self.documents.get(key); self.page = 0
@@ -764,6 +773,10 @@ class MainWindow(QMainWindow):
             self.drop.hide(); self.preview.show(); self._document_state(self.info); self._render(); self._validate_selected()
         else:
             self._document_state(None, loading=True)
+            generation = self.document_generations.get(key)
+            self.open_activity.begin(generation, self.t["activity_opening"])
+        if self.info:
+            self.open_activity.cancel()
         if self.file_browser.isVisible(): self._highlight_browser_path(self.path)
         self._refresh_document_combo(); self._update_document_controls()
 
@@ -792,6 +805,7 @@ class MainWindow(QMainWindow):
 
     def _loaded_document(self, key, info):
         if key not in self.documents: return
+        self.open_activity.finish(self.document_generations.get(key))
         self.documents[key] = info; self._refresh_document_combo()
         if key != (self._canonical(self.path) if self.path else None): return
         self.info = info; self.drop.hide(); self.preview.show(); self.fit_mode = "page"
@@ -802,6 +816,7 @@ class MainWindow(QMainWindow):
 
     def _failed_document(self, key, reason):
         if key not in self.documents: return
+        self.open_activity.finish(self.document_generations.get(key))
         release_document(self.document_paths.get(key, Path(key)))
         self.documents.pop(key); self._refresh_document_combo()
         self.document_paths.pop(key, None)
@@ -826,6 +841,7 @@ class MainWindow(QMainWindow):
             self._select_path(target)
         else:
             self.token += 1; self.render_serial += 1; self.path = None; self.info = None; self.page = 0
+            self.open_activity.cancel(); self.render_activity.cancel(); self.preflight_activity.cancel()
             self.preview.set_image_highlight()
             self._final_pixmap = None; self._render_limited = False
             self.preview.clear(); self.preview.hide(); self.drop.show(); self._document_state(None)
@@ -833,6 +849,7 @@ class MainWindow(QMainWindow):
 
     def clear_all(self):
         self._zoom_timer.stop(); self._render_pending = False
+        self.open_activity.cancel(); self.render_activity.cancel(); self.preflight_activity.cancel()
         self.token += 1; self.render_serial += 1
         self.preview.set_image_highlight()
         for path in tuple(self.document_paths.values()): release_document(path)
@@ -854,6 +871,7 @@ class MainWindow(QMainWindow):
         settings = self._preflight_settings
         report = self.preflight_reports.get((key, settings))
         if report is not None:
+            self.preflight_activity.cancel()
             self._preflight_display(report)
             render = next((r for r in report.results if r.check_id == "document.render"), None)
             self.validation[key] = "passed" if render and render.status is Status.PASSED else "failed"
@@ -863,6 +881,7 @@ class MainWindow(QMainWindow):
             self.check_tree.clear()
             generation = self.document_generations.get(key)
             task_key = (key, generation, settings)
+            self.preflight_activity.begin(task_key, self.t["activity_analyzing"])
             if task_key not in self.preflight_in_flight:
                 self.preflight_in_flight.add(task_key)
                 task = Task(self.token, lambda p=self.info.path, s=settings: run_preflight(p, s))
@@ -899,7 +918,9 @@ class MainWindow(QMainWindow):
         if token == self.token and key == (self._canonical(self.path) if self.path else None): self._validation_display("failed")
 
     def _preflight_done_for(self, key, generation, settings, report):
-        self.preflight_in_flight.discard((key, generation, settings))
+        task_key = (key, generation, settings)
+        self.preflight_in_flight.discard(task_key)
+        self.preflight_activity.finish(task_key)
         if key not in self.documents or self.document_generations.get(key) != generation:
             return
         self.preflight_reports[(key, settings)] = report
@@ -911,7 +932,9 @@ class MainWindow(QMainWindow):
             self._validation_display(self.validation[key])
 
     def _preflight_failed_for(self, key, generation, settings, _error):
-        self.preflight_in_flight.discard((key, generation, settings))
+        task_key = (key, generation, settings)
+        self.preflight_in_flight.discard(task_key)
+        self.preflight_activity.finish(task_key)
         if key not in self.documents or self.document_generations.get(key) != generation:
             return
         failure = tuple(CheckResult(f"{category}.failure", category, Status.UNKNOWN,
@@ -1226,6 +1249,8 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched, event):
         if watched is self.scroll.viewport() and event.type() == QEvent.Type.Resize:
+            self.open_activity.widget.move(12, 12)
+            self.render_activity.widget.move(12, 48)
             if self.info and self.fit_mode in ("page", "width"): self._schedule_zoom_render(True)
         return super().eventFilter(watched, event)
 
@@ -1262,10 +1287,11 @@ class MainWindow(QMainWindow):
             self._render_pending = True
             self._update_page_label(); return
         self._render_busy = True; self._render_active_serial = serial
+        self.render_activity.begin(serial, self.t["activity_rendering"])
         self._pdfium_render_started += 1
         task = Task(token, lambda: (serial, index, dpr, zoom, render_page_result(path, index, pixel_scale)))
         task.signals.result.connect(self._image_ready); task.signals.failed.connect(self._render_failed)
-        task.signals.finished.connect(self._render_finished); self._start_task(task, priority=10)
+        task.signals.finished.connect(lambda _token, current=serial: self._render_finished(_token, current)); self._start_task(task, priority=10)
         self._update_page_label()
 
     def _image_ready(self, token, result):
@@ -1282,7 +1308,9 @@ class MainWindow(QMainWindow):
         if rendered.limited:
             self.details["render"].setText(f"{self.t['render']}: {self.t.get('render_limited', 'Resolution limited')}")
 
-    def _render_finished(self, _token):
+    def _render_finished(self, _token, serial=None):
+        if serial is not None:
+            self.render_activity.finish(serial)
         self._render_busy = False; self._render_active_serial = None
         if self._render_pending and self.info and not self._zoom_timer.isActive():
             self._render_pending = False
@@ -1329,6 +1357,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._zoom_timer.stop(); self._render_pending = False
+        self.open_activity.cancel(); self.render_activity.cancel(); self.preflight_activity.cancel()
         self.token += 1; self.render_serial += 1
         for path in tuple(self.document_paths.values()): release_document(path)
         app = QApplication.instance()

@@ -20,6 +20,9 @@ jobs:
       - run: python scripts/ui_smoke.py
         env:
           QT_QPA_PLATFORM: offscreen
+      - run: python scripts/activity_screenshot_smoke.py
+        env:
+          QT_QPA_PLATFORM: offscreen
       - run: python scripts/help_screenshot_smoke.py
         env:
           QT_QPA_PLATFORM: offscreen
@@ -37,6 +40,9 @@ jobs:
       - run: python -m pytest -q
       - run: python scripts/pdfium_smoke.py
       - run: python scripts/ui_smoke.py
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - run: python scripts/activity_screenshot_smoke.py
         env:
           QT_QPA_PLATFORM: offscreen
       - run: python scripts/help_screenshot_smoke.py
@@ -77,6 +83,7 @@ jobs:
             dist/PPView-Setup-v*-x64.exe
             dist/SHA256SUMS.txt
             dist/PPView-v*-help-*.png
+            dist/PPView-v*-activity-*.png
             dist/zoom-benchmark.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

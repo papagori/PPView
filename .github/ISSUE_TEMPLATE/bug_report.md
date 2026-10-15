@@ -1,6 +1,6 @@
 ---
 name: Beta bug report
-about: Report a reproducible problem in PPView v0.3.0-beta.1
+about: Report a reproducible problem in PPView v0.3.0-beta.2
 title: "[Beta bug] "
 labels: bug, beta-feedback
 assignees: ''
@@ -8,7 +8,7 @@ assignees: ''
 
 ## PPView version
 
-0.3.0-beta.1
+0.3.0-beta.2
 
 ## Windows version
 
