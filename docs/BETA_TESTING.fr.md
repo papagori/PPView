@@ -14,6 +14,6 @@ Cette bêta sert à recueillir des retours sur l’aperçu local et le flux de p
 
 ## Signaler un problème
 
-Ouvrez un ticket sur [GitHub Issues](https://github.com/papagori/PPView) avec la version de PPView (`0.3.0-beta.1`), celle de Windows, la description, les étapes, le résultat attendu et réel, et éventuellement une capture d’écran sans illustration privée.
+Ouvrez un ticket sur [GitHub Issues](https://github.com/papagori/PPView/issues) avec la version de PPView (`0.3.0-beta.1`), celle de Windows, la description, les étapes, le résultat attendu et réel, et éventuellement une capture d’écran sans illustration privée.
 
 Ne joignez aucun document propriétaire, confidentiel ou client. Une description, une capture et une taille de fichier approximative suffisent généralement pour commencer. Ne désactivez pas l’antivirus ni les protections Windows.
